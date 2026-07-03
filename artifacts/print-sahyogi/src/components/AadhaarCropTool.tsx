@@ -100,12 +100,6 @@ export function AadhaarCropTool() {
     }
   };
 
-  // ─── Known card geometry (pdfjs scale-1 units) ───────────────────────────────
-  // Both cards sit side-by-side on the SAME row of the PDF page.
-  // FRONT (RIGHT card on page — photo, name, DOB): Left=626.773
-  // BACK  (LEFT  card on page — address, QR code): Left=101.404
-  const FRONT_CARD = { left: 626.773, top: 1149.72, w: 497.067, h: 313.6 } as const;
-  const BACK_CARD  = { left: 101.404, top: 1149.72, w: 497.067, h: 313.6 } as const;
   const RENDER_SCALE = 2; // higher = crisper images
 
   /** Slice a rectangular region from a canvas and return a new canvas.
@@ -140,43 +134,97 @@ export function AadhaarCropTool() {
     return canvas;
   };
 
+  /**
+   * For a single-page e-Aadhaar PDF the two card sides sit side-by-side.
+   * Instead of a blind 50/50 split (which catches instruction text above the cards)
+   * this function:
+   *  1. Finds the "card band" — the vertical rows where BOTH the left and right
+   *     halves of the page have meaningful content simultaneously.
+   *  2. Within that band locates the minimum-content column (the gap between cards).
+   *  3. Splits there, then density-crops each half to trim any remaining white margin.
+   */
+  const extractSinglePageCards = async (
+    page: pdfjsLib.PDFPageProxy,
+  ): Promise<string[]> => {
+    const canvas = await renderPageToCanvas(page);
+    const ctx    = canvas.getContext('2d')!;
+    const W = canvas.width;
+    const H = canvas.height;
+    const { data } = ctx.getImageData(0, 0, W, H);
+
+    const isContent = (i: number): boolean => {
+      if (data[i + 3] < 10) return false;
+      return data[i] < 230 || data[i + 1] < 230 || data[i + 2] < 230;
+    };
+
+    // ── Step 1: find the card band ──────────────────────────────────────────
+    // A row is "both-sides" when the left half AND right half each have
+    // at least 1% content pixels — text centred on the page won't meet this.
+    const halfW = Math.floor(W / 2);
+    const MIN_DENSITY = 0.01;
+
+    const rowBothSides: boolean[] = new Array(H).fill(false);
+    for (let y = 0; y < H; y++) {
+      let leftCnt = 0, rightCnt = 0;
+      for (let x = 0; x < W; x++) {
+        if (isContent((y * W + x) * 4)) {
+          if (x < halfW) leftCnt++; else rightCnt++;
+        }
+      }
+      rowBothSides[y] =
+        leftCnt  / halfW > MIN_DENSITY &&
+        rightCnt / (W - halfW) > MIN_DENSITY;
+    }
+
+    // Find the longest contiguous run of both-sides rows
+    let bestStart = 0, bestLen = 0, curStart = 0, curLen = 0;
+    for (let y = 0; y < H; y++) {
+      if (rowBothSides[y]) {
+        if (curLen === 0) curStart = y;
+        curLen++;
+        if (curLen > bestLen) { bestLen = curLen; bestStart = curStart; }
+      } else {
+        curLen = 0;
+      }
+    }
+
+    // Fallback: if detection failed, use full canvas
+    const PAD   = 20;
+    const bandY = bestLen > 50 ? Math.max(0, bestStart - PAD) : 0;
+    const bandH = bestLen > 50 ? Math.min(H - bandY, bestLen + PAD * 2) : H;
+
+    // ── Step 2: find the gap column between the two cards ───────────────────
+    // Scan the middle 40 % of the page width, find the column with fewest pixels.
+    const scanL = Math.floor(W * 0.30);
+    const scanR = Math.floor(W * 0.70);
+    let minPx = Infinity, gapX = Math.floor(W / 2);
+    for (let x = scanL; x < scanR; x++) {
+      let cnt = 0;
+      for (let y = bandY; y < bandY + bandH; y++) {
+        if (isContent((y * W + x) * 4)) cnt++;
+      }
+      if (cnt < minPx) { minPx = cnt; gapX = x; }
+    }
+
+    // ── Step 3: split and density-crop ──────────────────────────────────────
+    const leftCard  = sliceCanvas(canvas, 0,    bandY, gapX,    bandH);
+    const rightCard = sliceCanvas(canvas, gapX, bandY, W - gapX, bandH);
+
+    return [
+      autoCropCanvas(leftCard).toDataURL('image/png'),   // front (left side = photo/name)
+      autoCropCanvas(rightCard).toDataURL('image/png'),  // back  (right side = address/QR)
+    ];
+  };
+
   const processPDFPages = async (pdf: pdfjsLib.PDFDocumentProxy) => {
     try {
       const images: string[] = [];
 
       if (pdf.numPages === 1) {
-        // ── Single-page PDF: both sides live on one tall page ──────────────
-        const page   = await pdf.getPage(1);
-        const nat    = page.getViewport({ scale: 1 }); // natural dimensions
-        const canvas = await renderPageToCanvas(page);
-        const S      = RENDER_SCALE;
-
-        // Both cards sit side-by-side on the SAME row — same Top, different Left.
-        const fits = (card: { left: number; top: number; w: number; h: number }) =>
-          card.top + card.h <= nat.height &&
-          card.left + card.w <= nat.width &&
-          card.top >= 0 && card.left >= 0;
-
-        if (fits(FRONT_CARD) && fits(BACK_CARD)) {
-          // ── Happy path: slice each card using exact measured coordinates ──
-          // Front (right card on page)
-          images.push(
-            sliceCanvas(canvas, FRONT_CARD.left * S, FRONT_CARD.top * S, FRONT_CARD.w * S, FRONT_CARD.h * S)
-              .toDataURL('image/png'),
-          );
-          // Back (left card on page)
-          images.push(
-            sliceCanvas(canvas, BACK_CARD.left * S, BACK_CARD.top * S, BACK_CARD.w * S, BACK_CARD.h * S)
-              .toDataURL('image/png'),
-          );
-        } else {
-          // ── Fallback: split page into left/right halves, density-crop each ──
-          const halfW = Math.floor(canvas.width / 2);
-          const leftHalf  = sliceCanvas(canvas, 0,     0, halfW, canvas.height);
-          const rightHalf = sliceCanvas(canvas, halfW, 0, halfW, canvas.height);
-          images.push(autoCropCanvas(rightHalf).toDataURL('image/png')); // front
-          images.push(autoCropCanvas(leftHalf).toDataURL('image/png'));  // back
-        }
+        // ── Single-page PDF: two cards sit side-by-side ────────────────────
+        const page = await pdf.getPage(1);
+        const cards = await extractSinglePageCards(page);
+        images.push(...cards);
       } else {
         // ── Multi-page PDF: one card per page (render full page, no crop) ──
         for (let i = 1; i <= Math.min(pdf.numPages, 2); i++) {
