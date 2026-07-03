@@ -102,10 +102,10 @@ export function AadhaarCropTool() {
 
   // ─── Known card geometry (pdfjs scale-1 units) ───────────────────────────────
   // Both cards sit side-by-side on the SAME row of the PDF page.
-  // FRONT (right card on page): Left=101.404
-  // BACK  (left  card on page): Left=626.773
-  const FRONT_CARD = { left: 101.404, top: 1149.72, w: 497.067, h: 313.6 } as const;
-  const BACK_CARD  = { left: 626.773, top: 1149.72, w: 497.067, h: 313.6 } as const;
+  // FRONT (RIGHT card on page — photo, name, DOB): Left=626.773
+  // BACK  (LEFT  card on page — address, QR code): Left=101.404
+  const FRONT_CARD = { left: 626.773, top: 1149.72, w: 497.067, h: 313.6 } as const;
+  const BACK_CARD  = { left: 101.404, top: 1149.72, w: 497.067, h: 313.6 } as const;
   const RENDER_SCALE = 2; // higher = crisper images
 
   /** Slice a rectangular region from a canvas and return a new canvas.
