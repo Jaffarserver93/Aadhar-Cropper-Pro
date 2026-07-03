@@ -1,7 +1,7 @@
 {
   "version": 2,
   "buildCommand": "pnpm install --frozen-lockfile && pnpm --filter @workspace/print-sahyogi build",
-  "outputDirectory": "artifacts/print-sahyogi/dist/public",
+  "outputDirectory": "artifacts/print-sahyogi/dist",
   "installCommand": "pnpm install --frozen-lockfile",
   "framework": null,
   "rewrites": [
