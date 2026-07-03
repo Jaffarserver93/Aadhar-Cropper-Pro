@@ -138,82 +138,73 @@ export function AadhaarCropTool() {
     }
   };
 
-  // Auto-crop: scan from each edge inward to find the true card boundary.
-  // Uses threshold 235 (not 250) so light-coloured PVC card borders are always caught.
+  // Auto-crop: find card boundaries using DENSITY scanning.
+  // A row/column only counts as "content" when ≥ 1% of its pixels are non-white,
+  // so lone anti-aliased edge pixels never trick the scanner into cutting the card short.
   const autoCropCanvas = (sourceCanvas: HTMLCanvasElement): HTMLCanvasElement => {
     const ctx = sourceCanvas.getContext('2d');
     if (!ctx) return sourceCanvas;
 
-    const width = sourceCanvas.width;
+    const width  = sourceCanvas.width;
     const height = sourceCanvas.height;
     const { data } = ctx.getImageData(0, 0, width, height);
 
-    // A pixel is "content" when it is not near-white and not transparent.
-    // Threshold 235 catches even lightly-coloured borders (Aadhaar blue, orange strip, etc.)
-    const isContent = (x: number, y: number): boolean => {
-      const i = (y * width + x) * 4;
-      const a = data[i + 3];
-      if (a < 10) return false;
-      const r = data[i], g = data[i + 1], b = data[i + 2];
-      return r < 235 || g < 235 || b < 235;
+    // pixel is "content" when it is clearly not white/transparent
+    // threshold 230 catches Aadhaar orange, saffron, blue, red, and grey elements
+    const isContent = (i: number): boolean => {
+      if (data[i + 3] < 10) return false;
+      return data[i] < 230 || data[i + 1] < 230 || data[i + 2] < 230;
     };
 
-    // Scan from top — first row that contains any content pixel
-    let topRow = -1;
-    outer: for (let y = 0; y < height; y++) {
+    // Minimum number of content pixels needed in a row or column to be called "content row/col".
+    // 1% of the dimension — a single stray pixel is never enough.
+    const ROW_MIN = Math.max(4, Math.round(width  * 0.01));
+    const COL_MIN = Math.max(4, Math.round(height * 0.01));
+
+    const rowHasContent = (y: number): boolean => {
+      let n = 0;
       for (let x = 0; x < width; x++) {
-        if (isContent(x, y)) { topRow = y; break outer; }
+        if (isContent((y * width + x) * 4) && ++n >= ROW_MIN) return true;
       }
-    }
+      return false;
+    };
 
-    // Scan from bottom — last row that contains any content pixel
-    let bottomRow = -1;
-    outer: for (let y = height - 1; y >= 0; y--) {
-      for (let x = 0; x < width; x++) {
-        if (isContent(x, y)) { bottomRow = y; break outer; }
-      }
-    }
-
-    // Scan from left — first column that contains any content pixel
-    let leftCol = -1;
-    outer: for (let x = 0; x < width; x++) {
+    const colHasContent = (x: number): boolean => {
+      let n = 0;
       for (let y = 0; y < height; y++) {
-        if (isContent(x, y)) { leftCol = x; break outer; }
+        if (isContent((y * width + x) * 4) && ++n >= COL_MIN) return true;
       }
-    }
+      return false;
+    };
 
-    // Scan from right — last column that contains any content pixel
-    let rightCol = -1;
-    outer: for (let x = width - 1; x >= 0; x--) {
-      for (let y = 0; y < height; y++) {
-        if (isContent(x, y)) { rightCol = x; break outer; }
-      }
-    }
+    // Scan from each edge inward
+    let topRow = 0;
+    for (let y = 0; y < height; y++) { if (rowHasContent(y)) { topRow = y; break; } }
 
-    if (topRow === -1 || bottomRow === -1 || leftCol === -1 || rightCol === -1) {
-      return sourceCanvas;
-    }
+    let bottomRow = height - 1;
+    for (let y = height - 1; y >= 0; y--) { if (rowHasContent(y)) { bottomRow = y; break; } }
 
-    // Add generous, equal padding on all sides so no border pixel is ever clipped
-    const PAD = 28;
-    const minX = Math.max(0, leftCol - PAD);
-    const minY = Math.max(0, topRow - PAD);
-    const maxX = Math.min(width, rightCol + PAD);
+    let leftCol = 0;
+    for (let x = 0; x < width; x++) { if (colHasContent(x)) { leftCol = x; break; } }
+
+    let rightCol = width - 1;
+    for (let x = width - 1; x >= 0; x--) { if (colHasContent(x)) { rightCol = x; break; } }
+
+    // Generous padding — never let a card border pixel get clipped
+    const PAD = 40;
+    const minX = Math.max(0, leftCol  - PAD);
+    const minY = Math.max(0, topRow   - PAD);
+    const maxX = Math.min(width,  rightCol  + PAD);
     const maxY = Math.min(height, bottomRow + PAD);
 
-    const cropWidth  = maxX - minX;
-    const cropHeight = maxY - minY;
+    const cropW = maxX - minX;
+    const cropH = maxY - minY;
 
-    const cropCanvas = document.createElement('canvas');
-    cropCanvas.width  = cropWidth;
-    cropCanvas.height = cropHeight;
-    const cropCtx = cropCanvas.getContext('2d');
-
-    if (cropCtx) {
-      cropCtx.drawImage(sourceCanvas, minX, minY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
-    }
-
-    return cropCanvas;
+    const out = document.createElement('canvas');
+    out.width  = cropW;
+    out.height = cropH;
+    out.getContext('2d')?.drawImage(sourceCanvas, minX, minY, cropW, cropH, 0, 0, cropW, cropH);
+    return out;
   };
 
   // Generate an A4 size canvas layout for download — returns a Promise<string>
@@ -243,25 +234,31 @@ export function AadhaarCropTool() {
       };
 
       const drawImages = async () => {
-        if (images[0]) {
-          const img1 = await loadImg(images[0]);
-          const targetW = A4_WIDTH * 0.8;
-          const scale = targetW / img1.width;
-          const targetH = img1.height * scale;
-          const x = (A4_WIDTH - targetW) / 2;
-          const y = 100;
-          ctx.drawImage(img1, x, y, targetW, targetH);
-          
-          if (images[1]) {
-            const img2 = await loadImg(images[1]);
-            const targetW2 = A4_WIDTH * 0.8;
-            const scale2 = targetW2 / img2.width;
-            const targetH2 = img2.height * scale2;
-            const x2 = (A4_WIDTH - targetW2) / 2;
-            const y2 = y + targetH + 50;
-            ctx.drawImage(img2, x2, y2, targetW2, targetH2);
-          }
+        // Layout constants
+        const MARGIN   = 30;  // outer margin px
+        const GAP      = 20;  // gap between the two cards
+        const numCards = images.length;
+
+        // Each card gets an equal vertical slot
+        const slotH = Math.floor((A4_HEIGHT - MARGIN * 2 - GAP * (numCards - 1)) / numCards);
+        const slotW = A4_WIDTH - MARGIN * 2;
+
+        // "contain" an image inside a slot — scale to fit without stretching
+        const containDraw = (img: HTMLImageElement, slotX: number, slotY: number) => {
+          const scale = Math.min(slotW / img.naturalWidth, slotH / img.naturalHeight);
+          const w = img.naturalWidth  * scale;
+          const h = img.naturalHeight * scale;
+          const dx = slotX + (slotW - w) / 2;
+          const dy = slotY + (slotH - h) / 2;
+          ctx.drawImage(img, dx, dy, w, h);
+        };
+
+        for (let i = 0; i < images.length; i++) {
+          const img = await loadImg(images[i]);
+          const slotY = MARGIN + i * (slotH + GAP);
+          containDraw(img, MARGIN, slotY);
         }
+
         const dataUrl = a4Canvas.toDataURL('image/png');
         setPreviewDataUrl(dataUrl);
         resolve(dataUrl);
