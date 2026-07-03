@@ -75,8 +75,9 @@ export function AadhaarCropTool() {
     setIsProcessing(true);
 
     try {
+      // Slice a fresh copy each attempt — pdfjs transfers/detaches the original buffer to its worker
       const loadingTask = pdfjsLib.getDocument({ 
-        data: arrayBuffer,
+        data: arrayBuffer.slice(0),
         password: pdfPassword
       });
 
