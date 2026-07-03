@@ -1,6 +1,6 @@
-# [Project name]
+# Print Sahyogi
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A web tool that lets users upload, unlock (password-protected), auto-crop, and print Aadhaar card PDFs in a print-ready A4 layout — entirely client-side with zero data stored.
 
 ## Run & Operate
 
