@@ -100,35 +100,102 @@ export function AadhaarCropTool() {
     }
   };
 
+  // ─── Known card geometry (pdfjs scale-1 units) ───────────────────────────────
+  // Measured directly from the UIDAI e-Aadhaar PDF.
+  // The PDF is one tall page that holds both sides; the BACK card sits here:
+  const CARD = { left: 101.404, top: 1149.72, w: 497.067, h: 313.6 } as const;
+  const RENDER_SCALE = 2; // higher = crisper images
+
+  /** Slice a rectangular region from a canvas and return a new canvas.
+   *  Guards against zero/negative dimensions — returns the source untouched in that case. */
+  const sliceCanvas = (
+    src: HTMLCanvasElement,
+    x: number, y: number, w: number, h: number,
+  ): HTMLCanvasElement => {
+    const sx = Math.max(0, Math.floor(x));
+    const sy = Math.max(0, Math.floor(y));
+    const sw = Math.min(Math.ceil(w), src.width  - sx);
+    const sh = Math.min(Math.ceil(h), src.height - sy);
+    // Guard: if the requested region is empty or out of bounds, return original
+    if (sw <= 0 || sh <= 0) return src;
+    const out = document.createElement('canvas');
+    out.width  = sw;
+    out.height = sh;
+    out.getContext('2d')?.drawImage(src, sx, sy, sw, sh, 0, 0, sw, sh);
+    return out;
+  };
+
+  /** Render a single PDF page to an off-screen canvas at RENDER_SCALE */
+  const renderPageToCanvas = async (
+    page: pdfjsLib.PDFPageProxy,
+  ): Promise<HTMLCanvasElement> => {
+    const viewport = page.getViewport({ scale: RENDER_SCALE });
+    const canvas   = document.createElement('canvas');
+    const ctx      = canvas.getContext('2d')!;
+    canvas.width   = viewport.width;
+    canvas.height  = viewport.height;
+    await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+    return canvas;
+  };
+
   const processPDFPages = async (pdf: pdfjsLib.PDFDocumentProxy) => {
     try {
-      const numPages = Math.min(pdf.numPages, 2);
       const images: string[] = [];
 
-      for (let i = 1; i <= numPages; i++) {
-        const page = await pdf.getPage(i);
-        const viewport = page.getViewport({ scale: 2 }); // High res rendering
-        
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) continue;
-        
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        
-        // Render PDF page to canvas (pdfjs-dist v6 requires canvas field)
-        await page.render({ canvasContext: ctx, viewport, canvas }).promise;
-        
-        // Auto Crop using pixel data
-        const croppedCanvas = autoCropCanvas(canvas);
-        images.push(croppedCanvas.toDataURL('image/png'));
+      if (pdf.numPages === 1) {
+        // ── Single-page PDF: both sides live on one tall page ──────────────
+        const page   = await pdf.getPage(1);
+        const nat    = page.getViewport({ scale: 1 }); // natural dimensions
+        const canvas = await renderPageToCanvas(page);
+        const S      = RENDER_SCALE;
+
+        // BACK card  — user-measured coordinates
+        const backTop = CARD.top;
+
+        // FRONT card — same horizontal position, symmetric margin from top
+        // i.e. topMargin ≈ pageH − (CARD.top + CARD.h) — the bottom margin
+        const frontTop = nat.height - CARD.top - CARD.h;
+
+        // Validate that both regions actually fit inside the rendered page
+        const fits = (top: number) =>
+          top >= 0 &&
+          top + CARD.h <= nat.height &&
+          CARD.left + CARD.w <= nat.width;
+
+        if (fits(frontTop) && fits(backTop)) {
+          // ── Happy path: use the exact measured coordinates ─────────────
+          // Front
+          images.push(
+            sliceCanvas(canvas, CARD.left * S, frontTop * S, CARD.w * S, CARD.h * S)
+              .toDataURL('image/png'),
+          );
+          // Back
+          images.push(
+            sliceCanvas(canvas, CARD.left * S, backTop * S, CARD.w * S, CARD.h * S)
+              .toDataURL('image/png'),
+          );
+        } else {
+          // ── Fallback: split page into top/bottom halves, density-crop each ──
+          const halfH = Math.floor(canvas.height / 2);
+          const topHalf = sliceCanvas(canvas, 0, 0,      canvas.width, halfH);
+          const botHalf = sliceCanvas(canvas, 0, halfH,  canvas.width, halfH);
+          images.push(autoCropCanvas(topHalf).toDataURL('image/png'));
+          images.push(autoCropCanvas(botHalf).toDataURL('image/png'));
+        }
+      } else {
+        // ── Multi-page PDF: one card per page (render full page, no crop) ──
+        for (let i = 1; i <= Math.min(pdf.numPages, 2); i++) {
+          const page   = await pdf.getPage(i);
+          const canvas = await renderPageToCanvas(page);
+          // Each page IS the card — just density-trim white margins
+          images.push(autoCropCanvas(canvas).toDataURL('image/png'));
+        }
       }
 
       if (images.length > 0) setFrontImage(images[0]);
       if (images.length > 1) setBackImage(images[1]);
 
       await generateA4Preview(images);
-      
       setIsProcessing(false);
       setStep(4);
     } catch (err: any) {
