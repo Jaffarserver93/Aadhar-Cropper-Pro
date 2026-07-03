@@ -9,7 +9,7 @@ export function Footer() {
           <div className="col-span-1 md:col-span-1">
             <div className="flex items-center text-white mb-4">
               <Printer className="h-8 w-8 text-accent" />
-              <span className="ml-2 text-xl font-bold tracking-tight">Print Sahyogi</span>
+              <span className="ml-2 text-xl font-bold tracking-tight">EZONE Helper</span>
             </div>
             <p className="text-sm text-blue-200 max-w-xs">
               India's smart print companion for everyday documents. Fast, secure, and fully local.
@@ -41,10 +41,10 @@ export function Footer() {
         
         <div className="mt-12 pt-8 border-t border-white/10 flex flex-col md:flex-row items-center justify-between">
           <p className="text-sm">
-            &copy; {new Date().getFullYear()} Print Sahyogi. All rights reserved.
+            &copy; {new Date().getFullYear()} EZONE Helper. All rights reserved.
           </p>
           <p className="text-sm mt-4 md:mt-0 flex items-center">
-            Made with <span className="text-accent mx-1 text-lg">♥</span> in India
+            Made with <span className="text-accent mx-1 text-lg">♥</span> by <span className="font-semibold text-white mx-1">JXFR</span>
           </p>
         </div>
       </div>

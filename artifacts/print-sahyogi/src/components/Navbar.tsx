@@ -31,7 +31,7 @@ export function Navbar() {
           {/* Logo */}
           <div className="flex-shrink-0 flex items-center cursor-pointer" onClick={() => scrollToSection('#')}>
             <Printer className="h-8 w-8 text-primary" />
-            <span className="ml-2 text-xl font-bold text-primary tracking-tight">Print Sahyogi</span>
+            <span className="ml-2 text-xl font-bold text-primary tracking-tight">EZONE Helper</span>
           </div>
 
           {/* Desktop Nav */}

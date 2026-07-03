@@ -22,7 +22,7 @@ export function PrivacyPromise() {
           </div>
           <h2 className="text-3xl md:text-4xl font-bold text-white mb-6">Our Privacy Promise</h2>
           <p className="text-xl text-blue-100 mb-8 leading-relaxed">
-            Your Aadhaar contains sensitive information. We built Print Sahyogi so that <strong>no data ever leaves your device.</strong>
+            Your Aadhaar contains sensitive information. We built EZONE Helper so that <strong>no data ever leaves your device.</strong>
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
             <div className="bg-primary/50 p-4 rounded-xl border border-white/10">

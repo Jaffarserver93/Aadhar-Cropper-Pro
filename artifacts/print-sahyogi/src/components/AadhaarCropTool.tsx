@@ -423,7 +423,7 @@ export function AadhaarCropTool() {
   };
 
   // ── Utilities ────────────────────────────────────────────────────────────────
-  const baseName = file?.name.replace(/\.pdf$/i, '') || 'Aadhaar';
+  const baseName = `EZONE_${file?.name.replace(/\.pdf$/i, '') || 'Aadhaar'}`;
 
   const triggerDownload = (dataUrl: string, filename: string) => {
     const link = document.createElement('a');
