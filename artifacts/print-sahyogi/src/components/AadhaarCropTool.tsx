@@ -101,9 +101,11 @@ export function AadhaarCropTool() {
   };
 
   // ─── Known card geometry (pdfjs scale-1 units) ───────────────────────────────
-  // Measured directly from the UIDAI e-Aadhaar PDF.
-  // The PDF is one tall page that holds both sides; the BACK card sits here:
-  const CARD = { left: 101.404, top: 1149.72, w: 497.067, h: 313.6 } as const;
+  // Both cards sit side-by-side on the SAME row of the PDF page.
+  // FRONT (right card on page): Left=101.404
+  // BACK  (left  card on page): Left=626.773
+  const FRONT_CARD = { left: 101.404, top: 1149.72, w: 497.067, h: 313.6 } as const;
+  const BACK_CARD  = { left: 626.773, top: 1149.72, w: 497.067, h: 313.6 } as const;
   const RENDER_SCALE = 2; // higher = crisper images
 
   /** Slice a rectangular region from a canvas and return a new canvas.
@@ -149,38 +151,31 @@ export function AadhaarCropTool() {
         const canvas = await renderPageToCanvas(page);
         const S      = RENDER_SCALE;
 
-        // BACK card  — user-measured coordinates
-        const backTop = CARD.top;
+        // Both cards sit side-by-side on the SAME row — same Top, different Left.
+        const fits = (card: { left: number; top: number; w: number; h: number }) =>
+          card.top + card.h <= nat.height &&
+          card.left + card.w <= nat.width &&
+          card.top >= 0 && card.left >= 0;
 
-        // FRONT card — same horizontal position, symmetric margin from top
-        // i.e. topMargin ≈ pageH − (CARD.top + CARD.h) — the bottom margin
-        const frontTop = nat.height - CARD.top - CARD.h;
-
-        // Validate that both regions actually fit inside the rendered page
-        const fits = (top: number) =>
-          top >= 0 &&
-          top + CARD.h <= nat.height &&
-          CARD.left + CARD.w <= nat.width;
-
-        if (fits(frontTop) && fits(backTop)) {
-          // ── Happy path: use the exact measured coordinates ─────────────
-          // Front
+        if (fits(FRONT_CARD) && fits(BACK_CARD)) {
+          // ── Happy path: slice each card using exact measured coordinates ──
+          // Front (right card on page)
           images.push(
-            sliceCanvas(canvas, CARD.left * S, frontTop * S, CARD.w * S, CARD.h * S)
+            sliceCanvas(canvas, FRONT_CARD.left * S, FRONT_CARD.top * S, FRONT_CARD.w * S, FRONT_CARD.h * S)
               .toDataURL('image/png'),
           );
-          // Back
+          // Back (left card on page)
           images.push(
-            sliceCanvas(canvas, CARD.left * S, backTop * S, CARD.w * S, CARD.h * S)
+            sliceCanvas(canvas, BACK_CARD.left * S, BACK_CARD.top * S, BACK_CARD.w * S, BACK_CARD.h * S)
               .toDataURL('image/png'),
           );
         } else {
-          // ── Fallback: split page into top/bottom halves, density-crop each ──
-          const halfH = Math.floor(canvas.height / 2);
-          const topHalf = sliceCanvas(canvas, 0, 0,      canvas.width, halfH);
-          const botHalf = sliceCanvas(canvas, 0, halfH,  canvas.width, halfH);
-          images.push(autoCropCanvas(topHalf).toDataURL('image/png'));
-          images.push(autoCropCanvas(botHalf).toDataURL('image/png'));
+          // ── Fallback: split page into left/right halves, density-crop each ──
+          const halfW = Math.floor(canvas.width / 2);
+          const leftHalf  = sliceCanvas(canvas, 0,     0, halfW, canvas.height);
+          const rightHalf = sliceCanvas(canvas, halfW, 0, halfW, canvas.height);
+          images.push(autoCropCanvas(rightHalf).toDataURL('image/png')); // front
+          images.push(autoCropCanvas(leftHalf).toDataURL('image/png'));  // back
         }
       } else {
         // ── Multi-page PDF: one card per page (render full page, no crop) ──
