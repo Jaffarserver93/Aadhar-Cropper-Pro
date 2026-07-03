@@ -174,13 +174,12 @@ export function AadhaarCropTool() {
    */
   const RENDER_SCALE = 2;
   /**
-   * CROP_SCALE = 8 → 576 DPI from the 72-DPI PDF base.
-   * Aadhaar PDFs are vector, so text/lines scale perfectly to any DPI.
-   * We use an offset-viewport trick to render *only* the crop region
-   * into a small canvas — no full-page allocation needed, so this scale
-   * is safe even on mobile.
+   * CROP_SCALE = 10 → 720 DPI from the 72-DPI PDF base.
+   * Aadhaar PDFs are vector, so text/lines/QR scale perfectly at any DPI.
+   * We render *only* the crop region via offset viewport, so the canvas per
+   * card stays small (~2485×1568 px) regardless of this high scale.
    */
-  const CROP_SCALE = 8;
+  const CROP_SCALE = 10;
 
   /** Preview render — fast, display-intent at preview scale. */
   const renderPageToCanvas = async (
