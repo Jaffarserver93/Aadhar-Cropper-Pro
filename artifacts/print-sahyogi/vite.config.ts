@@ -4,9 +4,17 @@ import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 
 const isReplit = Boolean(process.env.REPL_ID);
+const isVercel = Boolean(process.env.VERCEL);
 
 const port = Number(process.env.PORT) || 3000;
 const basePath = process.env.BASE_PATH || '/';
+
+// On Vercel the project root is two levels up from the artifact dir.
+// Write there so vercel.json outputDirectory="dist" resolves correctly.
+// On Replit / local, write inside the artifact dir as usual.
+const outDir = isVercel
+  ? path.resolve(import.meta.dirname, '..', '..', 'dist')
+  : path.resolve(import.meta.dirname, 'dist');
 
 export default defineConfig(async () => {
   const plugins = [react(), tailwindcss()];
@@ -44,7 +52,7 @@ export default defineConfig(async () => {
     },
     root: path.resolve(import.meta.dirname),
     build: {
-      outDir: path.resolve(import.meta.dirname, 'dist'),
+      outDir,
       emptyOutDir: true,
     },
     server: {
