@@ -138,64 +138,81 @@ export function AadhaarCropTool() {
     }
   };
 
-  // Smart cropping algorithm
+  // Auto-crop: scan from each edge inward to find the true card boundary.
+  // Uses threshold 235 (not 250) so light-coloured PVC card borders are always caught.
   const autoCropCanvas = (sourceCanvas: HTMLCanvasElement): HTMLCanvasElement => {
     const ctx = sourceCanvas.getContext('2d');
     if (!ctx) return sourceCanvas;
 
     const width = sourceCanvas.width;
     const height = sourceCanvas.height;
-    const imageData = ctx.getImageData(0, 0, width, height);
-    const data = imageData.data;
-    
-    let minX = width, minY = height, maxX = 0, maxY = 0;
-    let found = false;
+    const { data } = ctx.getImageData(0, 0, width, height);
 
-    // Scan for non-white/transparent pixels
-    for (let y = 0; y < height; y++) {
+    // A pixel is "content" when it is not near-white and not transparent.
+    // Threshold 235 catches even lightly-coloured borders (Aadhaar blue, orange strip, etc.)
+    const isContent = (x: number, y: number): boolean => {
+      const i = (y * width + x) * 4;
+      const a = data[i + 3];
+      if (a < 10) return false;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      return r < 235 || g < 235 || b < 235;
+    };
+
+    // Scan from top — first row that contains any content pixel
+    let topRow = -1;
+    outer: for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        const idx = (y * width + x) * 4;
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
-        const a = data[idx + 3];
-        
-        // Threshold: ignoring pure white or high transparency
-        if (a > 20 && (r < 250 || g < 250 || b < 250)) {
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-          found = true;
-        }
+        if (isContent(x, y)) { topRow = y; break outer; }
       }
     }
 
-    if (!found) return sourceCanvas;
+    // Scan from bottom — last row that contains any content pixel
+    let bottomRow = -1;
+    outer: for (let y = height - 1; y >= 0; y--) {
+      for (let x = 0; x < width; x++) {
+        if (isContent(x, y)) { bottomRow = y; break outer; }
+      }
+    }
 
-    // Add padding (adjust based on scale)
-    const padding = 30;
-    minX = Math.max(0, minX - padding);
-    minY = Math.max(0, minY - padding);
-    maxX = Math.min(width, maxX + padding);
-    maxY = Math.min(height, maxY + padding);
-    
-    const cropWidth = maxX - minX;
+    // Scan from left — first column that contains any content pixel
+    let leftCol = -1;
+    outer: for (let x = 0; x < width; x++) {
+      for (let y = 0; y < height; y++) {
+        if (isContent(x, y)) { leftCol = x; break outer; }
+      }
+    }
+
+    // Scan from right — last column that contains any content pixel
+    let rightCol = -1;
+    outer: for (let x = width - 1; x >= 0; x--) {
+      for (let y = 0; y < height; y++) {
+        if (isContent(x, y)) { rightCol = x; break outer; }
+      }
+    }
+
+    if (topRow === -1 || bottomRow === -1 || leftCol === -1 || rightCol === -1) {
+      return sourceCanvas;
+    }
+
+    // Add generous, equal padding on all sides so no border pixel is ever clipped
+    const PAD = 28;
+    const minX = Math.max(0, leftCol - PAD);
+    const minY = Math.max(0, topRow - PAD);
+    const maxX = Math.min(width, rightCol + PAD);
+    const maxY = Math.min(height, bottomRow + PAD);
+
+    const cropWidth  = maxX - minX;
     const cropHeight = maxY - minY;
-    
+
     const cropCanvas = document.createElement('canvas');
-    cropCanvas.width = cropWidth;
+    cropCanvas.width  = cropWidth;
     cropCanvas.height = cropHeight;
     const cropCtx = cropCanvas.getContext('2d');
-    
+
     if (cropCtx) {
-      cropCtx.drawImage(
-        sourceCanvas,
-        minX, minY, cropWidth, cropHeight,
-        0, 0, cropWidth, cropHeight
-      );
+      cropCtx.drawImage(sourceCanvas, minX, minY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
     }
-    
+
     return cropCanvas;
   };
 
