@@ -9,10 +9,12 @@ const isVercel = Boolean(process.env.VERCEL);
 const port = Number(process.env.PORT) || 3000;
 const basePath = process.env.BASE_PATH || '/';
 
-// On Vercel, output to the project root's `build/` dir (not gitignored).
-// On Replit / local, output inside the artifact dir as usual.
+// Vercel resolves outputDirectory relative to the package dir (artifacts/print-sahyogi/),
+// not the monorepo root. Output to `build/` (not gitignored) within this package dir
+// so vercel.json outputDirectory="build" resolves correctly.
+// Locally / Replit: keep using `dist` inside the artifact dir.
 const outDir = isVercel
-  ? path.resolve(import.meta.dirname, '..', '..', 'build')
+  ? path.resolve(import.meta.dirname, 'build')
   : path.resolve(import.meta.dirname, 'dist');
 
 export default defineConfig(async () => {
