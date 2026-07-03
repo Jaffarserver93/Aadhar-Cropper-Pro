@@ -23,8 +23,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).href;
 
 /**
- * Fixed crop coordinates for the FRONT card (right side of the Aadhaar PDF).
- * These are canvas pixel coordinates at RENDER_SCALE = 2.
+ * Fixed crop coordinates for both Aadhaar cards.
+ * Canvas pixel coordinates at RENDER_SCALE = 2.
  */
 const FRONT_CROP = {
   x: 101.404,
@@ -33,8 +33,53 @@ const FRONT_CROP = {
   h: 313.6,
 } as const;
 
+const BACK_CROP = {
+  x: 626.773,
+  y: 1149.72,
+  w: 497.067,
+  h: 313.6,
+} as const;
+
 // 1=Upload  2=Password  3=Preview (crop overlay)  4=Processing  5=Result
 type Step = 1 | 2 | 3 | 4 | 5;
+
+/** Reusable crop-box overlay rendered on top of the PDF preview image. */
+function CropBox({
+  style,
+  label,
+  color,
+}: {
+  style: React.CSSProperties;
+  label: string;
+  color: 'orange' | 'blue';
+}) {
+  const ring = color === 'orange' ? 'ring-orange-400' : 'ring-blue-400';
+  const border = color === 'orange' ? 'border-orange-400' : 'border-blue-400';
+  const bg = color === 'orange' ? 'bg-orange-400' : 'bg-blue-500';
+
+  return (
+    <div className="absolute pointer-events-none" style={style}>
+      {/* Dim everything outside via box-shadow */}
+      <div className={`absolute inset-0 rounded-sm ring-2 ${ring} ring-offset-0 shadow-[0_0_0_9999px_rgba(0,0,0,0.25)]`} />
+      {/* Corner markers */}
+      {(['tl', 'tr', 'bl', 'br'] as const).map((c) => (
+        <div
+          key={c}
+          className={`absolute w-4 h-4 ${border} border-[3px]
+            ${c === 'tl' ? 'top-0 left-0 border-r-0 border-b-0 rounded-tl-sm' : ''}
+            ${c === 'tr' ? 'top-0 right-0 border-l-0 border-b-0 rounded-tr-sm' : ''}
+            ${c === 'bl' ? 'bottom-0 left-0 border-r-0 border-t-0 rounded-bl-sm' : ''}
+            ${c === 'br' ? 'bottom-0 right-0 border-l-0 border-t-0 rounded-br-sm' : ''}
+          `}
+        />
+      ))}
+      {/* Label */}
+      <span className={`absolute -top-6 left-0 text-[11px] font-semibold ${bg} text-white px-2 py-0.5 rounded-sm whitespace-nowrap shadow`}>
+        {label}
+      </span>
+    </div>
+  );
+}
 
 export function AadhaarCropTool() {
   const [step, setStep] = useState<Step>(1);
@@ -61,18 +106,26 @@ export function AadhaarCropTool() {
   const pageCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const previewWrapperRef = useRef<HTMLDivElement>(null);
 
-  // Overlay position in display pixels (computed after image renders)
-  const [overlayStyle, setOverlayStyle] = useState<React.CSSProperties>({});
+  // Overlay positions in display pixels (computed after image renders)
+  type CropBoxes = { front: React.CSSProperties; back: React.CSSProperties } | null;
+  const [cropBoxes, setCropBoxes] = useState<CropBoxes>(null);
 
   const updateOverlay = useCallback(() => {
     if (!previewWrapperRef.current || pageCanvasWidth === 0) return;
-    const displayW = previewWrapperRef.current.clientWidth;
-    const scale = displayW / pageCanvasWidth;
-    setOverlayStyle({
-      left: FRONT_CROP.x * scale,
-      top: FRONT_CROP.y * scale,
-      width: FRONT_CROP.w * scale,
-      height: FRONT_CROP.h * scale,
+    const scale = previewWrapperRef.current.clientWidth / pageCanvasWidth;
+    setCropBoxes({
+      front: {
+        left: FRONT_CROP.x * scale,
+        top:  FRONT_CROP.y * scale,
+        width: FRONT_CROP.w * scale,
+        height: FRONT_CROP.h * scale,
+      },
+      back: {
+        left: BACK_CROP.x * scale,
+        top:  BACK_CROP.y * scale,
+        width: BACK_CROP.w * scale,
+        height: BACK_CROP.h * scale,
+      },
     });
   }, [pageCanvasWidth]);
 
@@ -268,64 +321,16 @@ export function AadhaarCropTool() {
       FRONT_CROP.w, FRONT_CROP.h,
     );
 
-    // ── Back card: dynamic gap detection ─────────────────────────────────────
-    const ctx = canvas.getContext('2d')!;
-    const W = canvas.width;
-    const H = canvas.height;
-    const { data } = ctx.getImageData(0, 0, W, H);
-
-    const isContent = (i: number): boolean => {
-      if (data[i + 3] < 10) return false;
-      return data[i] < 230 || data[i + 1] < 230 || data[i + 2] < 230;
-    };
-
-    // Find the band where both halves have content simultaneously
-    const halfW = Math.floor(W / 2);
-    const MIN_DENSITY = 0.01;
-    const rowBothSides: boolean[] = new Array(H).fill(false);
-    for (let y = 0; y < H; y++) {
-      let leftCnt = 0, rightCnt = 0;
-      for (let x = 0; x < W; x++) {
-        if (isContent((y * W + x) * 4)) {
-          if (x < halfW) leftCnt++; else rightCnt++;
-        }
-      }
-      rowBothSides[y] =
-        leftCnt / halfW > MIN_DENSITY &&
-        rightCnt / (W - halfW) > MIN_DENSITY;
-    }
-
-    let bestStart = 0, bestLen = 0, curStart = 0, curLen = 0;
-    for (let y = 0; y < H; y++) {
-      if (rowBothSides[y]) {
-        if (curLen === 0) curStart = y;
-        curLen++;
-        if (curLen > bestLen) { bestLen = curLen; bestStart = curStart; }
-      } else { curLen = 0; }
-    }
-
-    const PAD = 20;
-    const bandY = bestLen > 50 ? Math.max(0, bestStart - PAD) : 0;
-    const bandH = bestLen > 50 ? Math.min(H - bandY, bestLen + PAD * 2) : H;
-
-    // Find minimum-density column (gap between cards)
-    const scanL = Math.floor(W * 0.30);
-    const scanR = Math.floor(W * 0.70);
-    let minPx = Infinity, gapX = Math.floor(W / 2);
-    for (let x = scanL; x < scanR; x++) {
-      let cnt = 0;
-      for (let y = bandY; y < bandY + bandH; y++) {
-        if (isContent((y * W + x) * 4)) cnt++;
-      }
-      if (cnt < minPx) { minPx = cnt; gapX = x; }
-    }
-
-    // Back card occupies the opposite horizontal half
-    const backCanvas = sliceCanvas(canvas, 0, bandY, gapX, bandH);
+    // ── Back card: fixed coordinates ─────────────────────────────────────────
+    const backCanvas = sliceCanvas(
+      canvas,
+      BACK_CROP.x, BACK_CROP.y,
+      BACK_CROP.w, BACK_CROP.h,
+    );
 
     return [
-      autoCropCanvas(frontCanvas).toDataURL('image/png'),  // front (right side)
-      autoCropCanvas(backCanvas).toDataURL('image/png'),   // back  (left side)
+      autoCropCanvas(frontCanvas).toDataURL('image/png'),  // front (right side) → top of A4
+      autoCropCanvas(backCanvas).toDataURL('image/png'),   // back  (left side)  → bottom of A4
     ];
   };
 
@@ -432,7 +437,7 @@ export function AadhaarCropTool() {
     setPreviewDataUrl(null);
     setPagePreviewDataUrl(null);
     setPageCanvasWidth(0);
-    setOverlayStyle({});
+    setCropBoxes(null);
     pdfDocRef.current = null;
     pageCanvasRef.current = null;
   };
@@ -596,16 +601,15 @@ export function AadhaarCropTool() {
       <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 w-full max-w-2xl text-sm text-amber-800">
         <Scissors className="h-4 w-4 mt-0.5 shrink-0 text-amber-600" />
         <span>
-          The <strong>orange box</strong> marks where the{' '}
-          <strong>front card (right side)</strong> will be cropped from your
-          Aadhaar PDF. Confirm to proceed, or go back to upload a different file.
+          Both crop areas are marked below —{' '}
+          <strong className="text-orange-600">Front</strong> (right side) and{' '}
+          <strong className="text-blue-600">Back</strong> (left side). Confirm
+          to crop both, or start over with a different file.
         </span>
       </div>
 
-      {/* PDF page preview with overlay */}
-      <div
-        className="w-full max-w-2xl bg-gray-100 rounded-2xl p-3 md:p-6 shadow-inner"
-      >
+      {/* PDF page preview with overlays */}
+      <div className="w-full max-w-2xl bg-gray-100 rounded-2xl p-3 md:p-6 shadow-inner">
         <div
           ref={previewWrapperRef}
           className="relative w-full overflow-hidden rounded-lg shadow"
@@ -619,33 +623,13 @@ export function AadhaarCropTool() {
                 onLoad={updateOverlay}
               />
 
-              {/* Crop-box overlay — drawn only when overlay is computed */}
-              {overlayStyle.width && (
-                <div
-                  className="absolute pointer-events-none"
-                  style={overlayStyle}
-                >
-                  {/* Outer glow / shadow */}
-                  <div className="absolute inset-0 rounded-sm ring-2 ring-orange-400 ring-offset-0 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
-
-                  {/* Corner markers */}
-                  {(['tl', 'tr', 'bl', 'br'] as const).map((corner) => (
-                    <div
-                      key={corner}
-                      className={`absolute w-4 h-4 border-orange-400 border-[3px]
-                        ${corner === 'tl' ? 'top-0 left-0 border-r-0 border-b-0 rounded-tl-sm' : ''}
-                        ${corner === 'tr' ? 'top-0 right-0 border-l-0 border-b-0 rounded-tr-sm' : ''}
-                        ${corner === 'bl' ? 'bottom-0 left-0 border-r-0 border-t-0 rounded-bl-sm' : ''}
-                        ${corner === 'br' ? 'bottom-0 right-0 border-l-0 border-t-0 rounded-br-sm' : ''}
-                      `}
-                    />
-                  ))}
-
-                  {/* Label */}
-                  <span className="absolute -top-6 left-0 text-[11px] font-semibold bg-orange-400 text-white px-2 py-0.5 rounded-sm whitespace-nowrap shadow">
-                    Front Card
-                  </span>
-                </div>
+              {cropBoxes && (
+                <>
+                  {/* Front card box — orange */}
+                  <CropBox style={cropBoxes.front} label="Front" color="orange" />
+                  {/* Back card box — blue */}
+                  <CropBox style={cropBoxes.back} label="Back" color="blue" />
+                </>
               )}
             </>
           )}
