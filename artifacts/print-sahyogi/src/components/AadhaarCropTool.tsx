@@ -179,7 +179,7 @@ export function AadhaarCropTool() {
    * We render *only* the crop region via offset viewport, so the canvas per
    * card stays small (~2485×1568 px) regardless of this high scale.
    */
-  const CROP_SCALE = 10;
+  const CROP_SCALE = 15;
 
   /** Preview render — fast, display-intent at preview scale. */
   const renderPageToCanvas = async (
