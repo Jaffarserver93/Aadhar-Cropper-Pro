@@ -174,13 +174,15 @@ export function AadhaarCropTool() {
    */
   const RENDER_SCALE = 2;
   /**
-   * CROP_SCALE = 6 → 432 DPI equivalent from the 72-DPI PDF base.
-   * pdfjs uses 'print' intent for crop renders, which activates its
-   * highest-quality font hinting, anti-aliasing, and image upsampling paths.
+   * CROP_SCALE = 8 → 576 DPI from the 72-DPI PDF base.
+   * Aadhaar PDFs are vector, so text/lines scale perfectly to any DPI.
+   * We use an offset-viewport trick to render *only* the crop region
+   * into a small canvas — no full-page allocation needed, so this scale
+   * is safe even on mobile.
    */
-  const CROP_SCALE = 6;
+  const CROP_SCALE = 8;
 
-  /** Preview render — fast, display-intent, lower scale. */
+  /** Preview render — fast, display-intent at preview scale. */
   const renderPageToCanvas = async (
     page: pdfjsLib.PDFPageProxy,
     scale = RENDER_SCALE,
@@ -194,21 +196,49 @@ export function AadhaarCropTool() {
     return canvas;
   };
 
-  /** High-quality crop render — uses 'print' intent for maximum fidelity. */
+  /**
+   * Renders ONLY the given crop rectangle directly into a canvas sized to
+   * the crop area. Uses pdfjs offsetX/offsetY to shift the page so the crop
+   * starts at canvas (0,0) — no full-page allocation, maximum quality.
+   * intent:'print' activates pdfjs's highest font-hinting and AA paths.
+   */
+  const renderCropRegion = async (
+    page: pdfjsLib.PDFPageProxy,
+    crop: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
+  ): Promise<HTMLCanvasElement> => {
+    const coordScale = CROP_SCALE / RENDER_SCALE;
+    const px = Math.floor(crop.x * coordScale);
+    const py = Math.floor(crop.y * coordScale);
+    const pw = Math.ceil(crop.w  * coordScale);
+    const ph = Math.ceil(crop.h  * coordScale);
+
+    // Offset viewport: shifts the PDF render so the crop region lands at (0,0)
+    const viewport = page.getViewport({ scale: CROP_SCALE, offsetX: -px, offsetY: -py });
+
+    const canvas = document.createElement('canvas');
+    canvas.width  = pw;
+    canvas.height = ph;
+    // alpha:false → browser skips premultiplied-alpha, text edges stay crisp
+    const ctx = canvas.getContext('2d', { alpha: false })!;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, pw, ph);
+
+    await page.render({ canvasContext: ctx, canvas, viewport, intent: 'print' }).promise;
+    return canvas;
+  };
+
+  /** Full-page high-quality render (multi-page PDFs where whole page = one card). */
   const renderPageForCrop = async (
     page: pdfjsLib.PDFPageProxy,
   ): Promise<HTMLCanvasElement> => {
     const viewport = page.getViewport({ scale: CROP_SCALE });
     const canvas = document.createElement('canvas');
-    // alpha:false lets the browser skip premultiplied-alpha blending,
-    // keeping text edges sharper on a white background.
     const ctx = canvas.getContext('2d', { alpha: false })!;
-    canvas.width = viewport.width;
+    canvas.width  = viewport.width;
     canvas.height = viewport.height;
-    // Fill white first (alpha:false starts transparent-black otherwise)
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    await page.render({ canvasContext: ctx, viewport, canvas, intent: 'print' }).promise;
+    await page.render({ canvasContext: ctx, canvas, viewport, intent: 'print' }).promise;
     return canvas;
   };
 
@@ -332,33 +362,20 @@ export function AadhaarCropTool() {
 
   // ── Card extraction ──────────────────────────────────────────────────────────
   /**
-   * Renders the page using the high-quality print-intent path at CROP_SCALE.
-   * Crop coordinates are scaled proportionally from their RENDER_SCALE baseline.
+   * Renders front and back crops in parallel — each at CROP_SCALE with print
+   * intent, into a canvas sized exactly to the crop region (no full-page alloc).
    * Returns [frontDataUrl, backDataUrl].
    */
   const extractSinglePageCards = async (
     page: pdfjsLib.PDFPageProxy,
   ): Promise<string[]> => {
-    const canvas = await renderPageForCrop(page);
-    const coordScale = CROP_SCALE / RENDER_SCALE; // = 3 when CROP_SCALE=6, RENDER_SCALE=2
-
-    // ── Front card ────────────────────────────────────────────────────────────
-    const frontCanvas = sliceCanvas(
-      canvas,
-      FRONT_CROP.x * coordScale, FRONT_CROP.y * coordScale,
-      FRONT_CROP.w * coordScale, FRONT_CROP.h * coordScale,
-    );
-
-    // ── Back card ─────────────────────────────────────────────────────────────
-    const backCanvas = sliceCanvas(
-      canvas,
-      BACK_CROP.x * coordScale, BACK_CROP.y * coordScale,
-      BACK_CROP.w * coordScale, BACK_CROP.h * coordScale,
-    );
-
+    const [frontCanvas, backCanvas] = await Promise.all([
+      renderCropRegion(page, FRONT_CROP),
+      renderCropRegion(page, BACK_CROP),
+    ]);
     return [
-      autoCropCanvas(frontCanvas).toDataURL('image/png'),  // front → top of A4
-      autoCropCanvas(backCanvas).toDataURL('image/png'),   // back  → bottom of A4
+      frontCanvas.toDataURL('image/png'),
+      backCanvas.toDataURL('image/png'),
     ];
   };
 
@@ -395,18 +412,21 @@ export function AadhaarCropTool() {
 
   // ── A4 layout generation ─────────────────────────────────────────────────────
   // Front card goes on TOP, back card below — full A4 width, no cutting.
-  // Canvas is 2× the display size (≈150 DPI) so it stays crisp when printed.
+  // A4 canvas at 3× display size (≈225 DPI) — matches the higher-quality card crops.
   const generateA4Preview = (images: string[]): Promise<string> => {
     return new Promise((resolve) => {
-      const A4_WIDTH = 1588;  // 2× 794
-      const A4_HEIGHT = 2246; // 2× 1123
+      const A4_WIDTH  = 2382; // 3× 794
+      const A4_HEIGHT = 3369; // 3× 1123
 
       const a4Canvas = document.createElement('canvas');
-      a4Canvas.width = A4_WIDTH;
+      a4Canvas.width  = A4_WIDTH;
       a4Canvas.height = A4_HEIGHT;
       const ctx = a4Canvas.getContext('2d');
       if (!ctx) { resolve(''); return; }
 
+      // Use highest-quality downscaling when fitting card images into slots
+      ctx.imageSmoothingEnabled  = true;
+      ctx.imageSmoothingQuality  = 'high';
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, A4_WIDTH, A4_HEIGHT);
 
@@ -418,15 +438,15 @@ export function AadhaarCropTool() {
         });
 
       const drawImages = async () => {
-        const MARGIN = 60;  // 2× original — matches the doubled canvas size
-        const GAP = 40;    // 2× original
+        const MARGIN = 90;  // 3× original
+        const GAP    = 60;  // 3× original
         const numCards = images.length;
         const slotH = Math.floor((A4_HEIGHT - MARGIN * 2 - GAP * (numCards - 1)) / numCards);
         const slotW = A4_WIDTH - MARGIN * 2;
 
         const containDraw = (img: HTMLImageElement, slotX: number, slotY: number) => {
           const scale = Math.min(slotW / img.naturalWidth, slotH / img.naturalHeight);
-          const w = img.naturalWidth * scale;
+          const w = img.naturalWidth  * scale;
           const h = img.naturalHeight * scale;
           ctx.drawImage(img, slotX + (slotW - w) / 2, slotY + (slotH - h) / 2, w, h);
         };
