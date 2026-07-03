@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "Print Sahyogi"
+version = "1.0.0"
+id = "artifacts/print-sahyogi"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18207
+
+[services.development]
+run = "pnpm --filter @workspace/print-sahyogi run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/print-sahyogi", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/print-sahyogi/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18207"
+BASE_PATH = "/"
