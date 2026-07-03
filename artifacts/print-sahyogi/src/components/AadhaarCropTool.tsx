@@ -166,12 +166,20 @@ export function AadhaarCropTool() {
   };
 
   // ── PDF Loading ──────────────────────────────────────────────────────────────
+  /**
+   * RENDER_SCALE — used for the on-screen preview only (keeps it fast).
+   * CROP_SCALE   — used when actually extracting cards (higher = crisper output).
+   * Crop coordinates are defined at RENDER_SCALE; multiply by
+   * (CROP_SCALE / RENDER_SCALE) when rendering at CROP_SCALE.
+   */
   const RENDER_SCALE = 2;
+  const CROP_SCALE   = 4; // 2× the preview scale → sharp at A4 print size
 
   const renderPageToCanvas = async (
     page: pdfjsLib.PDFPageProxy,
+    scale = RENDER_SCALE,
   ): Promise<HTMLCanvasElement> => {
-    const viewport = page.getViewport({ scale: RENDER_SCALE });
+    const viewport = page.getViewport({ scale });
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d')!;
     canvas.width = viewport.width;
@@ -300,37 +308,34 @@ export function AadhaarCropTool() {
 
   // ── Card extraction ──────────────────────────────────────────────────────────
   /**
-   * Single-page PDF: the front (right) card uses the fixed FRONT_CROP coordinates.
-   * The back (left) card uses dynamic gap detection.
-   * Returns [frontImage, backImage].
+   * Renders the page at CROP_SCALE (higher than RENDER_SCALE) for sharp output.
+   * Crop coordinates are scaled proportionally from their RENDER_SCALE baseline.
+   * Returns [frontDataUrl, backDataUrl].
    */
   const extractSinglePageCards = async (
     page: pdfjsLib.PDFPageProxy,
   ): Promise<string[]> => {
-    // Reuse cached canvas from the preview render if available
-    let canvas = pageCanvasRef.current;
-    if (!canvas) {
-      canvas = await renderPageToCanvas(page);
-      pageCanvasRef.current = canvas;
-    }
+    // Always render fresh at the higher CROP_SCALE — don't reuse the preview canvas
+    const canvas = await renderPageToCanvas(page, CROP_SCALE);
+    const coordScale = CROP_SCALE / RENDER_SCALE; // = 2 when CROP_SCALE=4, RENDER_SCALE=2
 
-    // ── Front card: fixed coordinates ────────────────────────────────────────
+    // ── Front card ────────────────────────────────────────────────────────────
     const frontCanvas = sliceCanvas(
       canvas,
-      FRONT_CROP.x, FRONT_CROP.y,
-      FRONT_CROP.w, FRONT_CROP.h,
+      FRONT_CROP.x * coordScale, FRONT_CROP.y * coordScale,
+      FRONT_CROP.w * coordScale, FRONT_CROP.h * coordScale,
     );
 
-    // ── Back card: fixed coordinates ─────────────────────────────────────────
+    // ── Back card ─────────────────────────────────────────────────────────────
     const backCanvas = sliceCanvas(
       canvas,
-      BACK_CROP.x, BACK_CROP.y,
-      BACK_CROP.w, BACK_CROP.h,
+      BACK_CROP.x * coordScale, BACK_CROP.y * coordScale,
+      BACK_CROP.w * coordScale, BACK_CROP.h * coordScale,
     );
 
     return [
-      autoCropCanvas(frontCanvas).toDataURL('image/png'),  // front (right side) → top of A4
-      autoCropCanvas(backCanvas).toDataURL('image/png'),   // back  (left side)  → bottom of A4
+      autoCropCanvas(frontCanvas).toDataURL('image/png'),  // front → top of A4
+      autoCropCanvas(backCanvas).toDataURL('image/png'),   // back  → bottom of A4
     ];
   };
 
@@ -344,9 +349,10 @@ export function AadhaarCropTool() {
         const cards = await extractSinglePageCards(page);
         images.push(...cards);
       } else {
+        // Multi-page: each page is one card — render at CROP_SCALE for quality
         for (let i = 1; i <= Math.min(pdf.numPages, 2); i++) {
           const page = await pdf.getPage(i);
-          const canvas = await renderPageToCanvas(page);
+          const canvas = await renderPageToCanvas(page, CROP_SCALE);
           images.push(autoCropCanvas(canvas).toDataURL('image/png'));
         }
       }
@@ -366,10 +372,11 @@ export function AadhaarCropTool() {
 
   // ── A4 layout generation ─────────────────────────────────────────────────────
   // Front card goes on TOP, back card below — full A4 width, no cutting.
+  // Canvas is 2× the display size (≈150 DPI) so it stays crisp when printed.
   const generateA4Preview = (images: string[]): Promise<string> => {
     return new Promise((resolve) => {
-      const A4_WIDTH = 794;
-      const A4_HEIGHT = 1123;
+      const A4_WIDTH = 1588;  // 2× 794
+      const A4_HEIGHT = 2246; // 2× 1123
 
       const a4Canvas = document.createElement('canvas');
       a4Canvas.width = A4_WIDTH;
@@ -388,8 +395,8 @@ export function AadhaarCropTool() {
         });
 
       const drawImages = async () => {
-        const MARGIN = 30;
-        const GAP = 20;
+        const MARGIN = 60;  // 2× original — matches the doubled canvas size
+        const GAP = 40;    // 2× original
         const numCards = images.length;
         const slotH = Math.floor((A4_HEIGHT - MARGIN * 2 - GAP * (numCards - 1)) / numCards);
         const slotW = A4_WIDTH - MARGIN * 2;
@@ -416,14 +423,25 @@ export function AadhaarCropTool() {
   };
 
   // ── Utilities ────────────────────────────────────────────────────────────────
-  const handleDownload = () => {
-    if (!previewDataUrl) return;
+  const baseName = file?.name.replace(/\.pdf$/i, '') || 'Aadhaar';
+
+  const triggerDownload = (dataUrl: string, filename: string) => {
     const link = document.createElement('a');
-    link.href = previewDataUrl;
-    link.download = `Print_Sahyogi_${file?.name.replace('.pdf', '') || 'Aadhaar'}.png`;
+    link.href = dataUrl;
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleDownload = () => {
+    if (previewDataUrl) triggerDownload(previewDataUrl, `${baseName}_A4.png`);
+  };
+  const handleDownloadFront = () => {
+    if (frontImage) triggerDownload(frontImage, `${baseName}_Front.png`);
+  };
+  const handleDownloadBack = () => {
+    if (backImage) triggerDownload(backImage, `${baseName}_Back.png`);
   };
 
   const resetTool = () => {
@@ -678,26 +696,49 @@ export function AadhaarCropTool() {
       animate={{ opacity: 1, y: 0 }}
       className="flex flex-col items-center w-full"
     >
-      <div className="flex flex-col sm:flex-row justify-between w-full max-w-4xl mb-8 gap-4 print:hidden">
-        <div className="flex items-center space-x-3 text-green-600 font-semibold bg-green-50 px-4 py-2 rounded-lg">
-          <CheckCircle2 className="h-5 w-5" />
-          <span>Ready to Print!</span>
+      <div className="flex flex-col w-full max-w-4xl mb-8 gap-3 print:hidden">
+        {/* Status + print/A4-download row */}
+        <div className="flex flex-col sm:flex-row justify-between gap-3">
+          <div className="flex items-center space-x-3 text-green-600 font-semibold bg-green-50 px-4 py-2 rounded-lg">
+            <CheckCircle2 className="h-5 w-5" />
+            <span>Ready to Print!</span>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => window.print()}
+              className="flex items-center px-5 py-2 bg-primary text-white rounded-lg font-medium shadow-sm hover:bg-primary/90 transition"
+            >
+              <Printer className="h-4 w-4 mr-2" />
+              Print A4
+            </button>
+            <button
+              onClick={handleDownload}
+              disabled={!previewDataUrl}
+              className="flex items-center px-5 py-2 border-2 border-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Save A4
+            </button>
+          </div>
         </div>
-        <div className="flex space-x-3">
+
+        {/* Individual card downloads */}
+        <div className="flex gap-2">
           <button
-            onClick={() => window.print()}
-            className="flex items-center px-6 py-2 bg-primary text-white rounded-lg font-medium shadow-sm hover:bg-primary/90 transition"
+            onClick={handleDownloadFront}
+            disabled={!frontImage}
+            className="flex-1 flex items-center justify-center gap-2 px-5 py-2.5 bg-orange-50 border-2 border-orange-200 text-orange-700 rounded-lg font-medium hover:bg-orange-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Printer className="h-4 w-4 mr-2" />
-            Print Now
+            <Download className="h-4 w-4" />
+            Download Front
           </button>
           <button
-            onClick={handleDownload}
-            disabled={!previewDataUrl}
-            className="flex items-center px-6 py-2 border-2 border-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={handleDownloadBack}
+            disabled={!backImage}
+            className="flex-1 flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-50 border-2 border-blue-200 text-blue-700 rounded-lg font-medium hover:bg-blue-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Download className="h-4 w-4 mr-2" />
-            Save PNG
+            <Download className="h-4 w-4" />
+            Download Back
           </button>
         </div>
       </div>
