@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useLocation } from 'wouter';
-import { Printer, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Printer, Eye, EyeOff, Loader2, MailCheck } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function Login() {
@@ -10,6 +10,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState('');
+  const [needsConfirm, setNeedsConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
 
   if (user) {
@@ -20,11 +21,20 @@ export default function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setNeedsConfirm(false);
     setLoading(true);
     const { error } = await signIn(email, password);
     setLoading(false);
+
     if (error) {
-      setError(error);
+      if (
+        error.toLowerCase().includes('email not confirmed') ||
+        error.toLowerCase().includes('not confirmed')
+      ) {
+        setNeedsConfirm(true);
+      } else {
+        setError(error);
+      }
     } else {
       navigate('/');
     }
@@ -41,6 +51,19 @@ export default function Login() {
             <h1 className="text-2xl font-bold text-gray-900">EZONE Helper</h1>
             <p className="text-gray-500 text-sm mt-1">Sign in to your account</p>
           </div>
+
+          {needsConfirm && (
+            <div className="mb-4 px-4 py-4 bg-blue-50 border border-blue-200 text-blue-800 text-sm rounded-lg flex gap-3">
+              <MailCheck className="h-5 w-5 shrink-0 mt-0.5 text-blue-500" />
+              <div>
+                <p className="font-semibold mb-1">Email confirmation required</p>
+                <p className="text-blue-700 text-xs">
+                  Check your inbox for a confirmation link and click it to activate your account.
+                  If you didn't receive it, ask the admin to disable email confirmation in Supabase.
+                </p>
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
