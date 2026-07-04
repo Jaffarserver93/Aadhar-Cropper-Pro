@@ -12,6 +12,9 @@ import {
   ZoomOut,
   Crosshair,
   Tag,
+  Lock,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -62,6 +65,13 @@ export default function DemoPDF() {
   const [copied, setCopied]             = useState<string | null>(null);
   const [loading, setLoading]           = useState(false);
 
+  // Password state
+  const [needsPassword, setNeedsPassword] = useState(false);
+  const [password, setPassword]           = useState('');
+  const [showPw, setShowPw]               = useState(false);
+  const [pwError, setPwError]             = useState('');
+  const pendingBufferRef = useRef<ArrayBuffer | null>(null);
+
   const pdfRef     = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
   const fileRef    = useRef<HTMLInputElement>(null);
   const imgRef     = useRef<HTMLImageElement>(null);
@@ -84,26 +94,48 @@ export default function DemoPDF() {
     setLoading(false);
   }, []);
 
-  // ── Load PDF from ArrayBuffer ──────────────────────────────────────────────
-  const loadPDF = useCallback(async (buffer: ArrayBuffer) => {
+  // ── Load PDF from ArrayBuffer (with optional password) ────────────────────
+  const loadPDF = useCallback(async (buffer: ArrayBuffer, pw?: string) => {
     setLoading(true);
-    const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
-    pdfRef.current = pdf;
-    setNumPages(pdf.numPages);
-    setCurrentPage(1);
-    setRegions([]);
-    await renderPage(pdf, 1);
+    setPwError('');
+    try {
+      const pdf = await pdfjsLib.getDocument({ data: buffer.slice(0), password: pw }).promise;
+      pdfRef.current = pdf;
+      setNumPages(pdf.numPages);
+      setCurrentPage(1);
+      setRegions([]);
+      setNeedsPassword(false);
+      setPassword('');
+      pendingBufferRef.current = null;
+      await renderPage(pdf, 1);
+    } catch (err: any) {
+      setLoading(false);
+      if (err.name === 'PasswordException') {
+        pendingBufferRef.current = buffer;
+        if (pw) setPwError('Incorrect password, try again.');
+        setNeedsPassword(true);
+      }
+    }
   }, [renderPage]);
 
   useEffect(() => {
     if (pdfRef.current) renderPage(pdfRef.current, currentPage);
   }, [currentPage, renderPage]);
 
+  const handleUnlock = () => {
+    if (pendingBufferRef.current && password) {
+      loadPDF(pendingBufferRef.current, password);
+    }
+  };
+
   // ── File handling ──────────────────────────────────────────────────────────
   const handleFile = async (file: File) => {
     if (file.type !== 'application/pdf') return;
+    setNeedsPassword(false);
+    setPassword('');
+    setPwError('');
     const buffer = await file.arrayBuffer();
-    setPdfDataUrl(file.name); // just store name for display tracking
+    setPdfDataUrl(file.name);
     loadPDF(buffer);
   };
 
