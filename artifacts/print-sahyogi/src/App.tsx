@@ -4,6 +4,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import Home from '@/pages/Home';
 import AadhaarCropPage from '@/pages/AadhaarCropPage';
+import VoterIdCropPage from '@/pages/VoterIdCropPage';
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
 import CodeGenerator from '@/pages/CodeGenerator';
@@ -47,6 +48,9 @@ function Router() {
       <Route path="/demopdf" component={DemoPDF} />
       <Route path="/aadhaar/crop">
         {() => <ProtectedRoute component={AadhaarCropPage} />}
+      </Route>
+      <Route path="/voter-id-card/crop">
+        {() => <ProtectedRoute component={VoterIdCropPage} />}
       </Route>
       <Route component={NotFound} />
     </Switch>
