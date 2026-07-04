@@ -16,6 +16,8 @@ import {
   Eye,
   EyeOff,
   X,
+  Scissors,
+  Download,
 } from 'lucide-react';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -66,6 +68,9 @@ export default function DemoPDF() {
   const [copied, setCopied]               = useState<string | null>(null);
   const [loading, setLoading]             = useState(false);
   const [showSidebar, setShowSidebar]     = useState(false);
+
+  // Crop preview state
+  const [cropPreview, setCropPreview] = useState<{ dataUrl: string; name: string } | null>(null);
 
   // Password state
   const [needsPassword, setNeedsPassword] = useState(false);
@@ -288,6 +293,30 @@ export default function DemoPDF() {
     setRegions((prev) => prev.map((r) => r.id === id ? { ...r, [field]: val } : r));
   };
 
+  // ── Crop a region out of the current page canvas ─────────────────────────
+  const cropRegion = (r: Region) => {
+    if (!canvasDataUrl) return;
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const w = Math.round(r.w);
+      const h = Math.round(r.h);
+      canvas.width  = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, Math.round(r.x), Math.round(r.y), w, h, 0, 0, w, h);
+      setCropPreview({ dataUrl: canvas.toDataURL('image/png'), name: r.name });
+    };
+    img.src = canvasDataUrl;
+  };
+
+  const downloadCrop = (dataUrl: string, name: string) => {
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = `${name.replace(/\s+/g, '_')}_crop.png`;
+    a.click();
+  };
+
   // ── Image resize → recompute overlay positions ───────────────────────────
   useEffect(() => {
     const obs = new ResizeObserver(() => setZoom((z) => z));
@@ -309,6 +338,49 @@ export default function DemoPDF() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col">
+
+      {/* ── Crop Preview Modal ─────────────────────────────────────────────── */}
+      {cropPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden">
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+              <div className="flex items-center gap-2">
+                <Scissors className="h-4 w-4 text-indigo-400" />
+                <span className="text-sm font-semibold text-white">{cropPreview.name}</span>
+                <span className="text-xs text-gray-500">— cropped</span>
+              </div>
+              <button onClick={() => setCropPreview(null)}
+                className="p-1.5 text-gray-400 hover:text-white transition rounded-lg hover:bg-gray-800">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Cropped image */}
+            <div className="p-4 flex items-center justify-center bg-gray-950 min-h-[120px]">
+              <img
+                src={cropPreview.dataUrl}
+                alt={cropPreview.name}
+                className="max-w-full max-h-[60vh] rounded-lg shadow-xl object-contain"
+                style={{ imageRendering: 'pixelated' }}
+              />
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2 p-3 border-t border-gray-800">
+              <button onClick={() => setCropPreview(null)}
+                className="flex-1 px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-xl transition">
+                Close
+              </button>
+              <button onClick={() => downloadCrop(cropPreview.dataUrl, cropPreview.name)}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-xl transition">
+                <Download className="h-4 w-4" />
+                Download PNG
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Password Modal ─────────────────────────────────────────────────── */}
       {needsPassword && (
@@ -615,6 +687,10 @@ export default function DemoPDF() {
                           {r.name}
                         </span>
                       )}
+                      <button onClick={() => cropRegion(r)} title="Crop this region"
+                        className="p-1 text-gray-400 hover:text-indigo-400 transition shrink-0">
+                        <Scissors className="h-3.5 w-3.5" />
+                      </button>
                       <button onClick={() => copyRegion(r)} title="Copy coordinates"
                         className="p-1 text-gray-400 hover:text-white transition shrink-0">
                         {copied === r.id ? <CheckCheck className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
