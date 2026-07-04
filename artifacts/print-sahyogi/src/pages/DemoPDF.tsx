@@ -282,6 +282,12 @@ export default function DemoPDF() {
     setRegions((prev) => prev.map((r) => r.id === id ? { ...r, name } : r));
   };
 
+  const updateRegionField = (id: string, field: 'x' | 'y' | 'w' | 'h', raw: string) => {
+    const val = parseFloat(raw);
+    if (isNaN(val) || val < 0) return;
+    setRegions((prev) => prev.map((r) => r.id === id ? { ...r, [field]: val } : r));
+  };
+
   // ── Image resize → recompute overlay positions ───────────────────────────
   useEffect(() => {
     const obs = new ResizeObserver(() => setZoom((z) => z));
@@ -619,13 +625,22 @@ export default function DemoPDF() {
                       </button>
                     </div>
 
-                    <div className="px-3 py-2 bg-gray-950/60 font-mono text-[11px] leading-relaxed text-gray-300">
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                        <span className="text-gray-500">x</span><span>{r.x.toFixed(3)}</span>
-                        <span className="text-gray-500">y</span><span>{r.y.toFixed(3)}</span>
-                        <span className="text-gray-500">w</span><span>{r.w.toFixed(3)}</span>
-                        <span className="text-gray-500">h</span><span>{r.h.toFixed(3)}</span>
-                      </div>
+                    {/* Editable X Y W H inputs */}
+                    <div className="px-3 py-2 bg-gray-950/60 grid grid-cols-2 gap-1.5">
+                      {(['x', 'y', 'w', 'h'] as const).map((field) => (
+                        <label key={field} className="flex items-center gap-1.5 bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 focus-within:border-indigo-500 transition">
+                          <span className="text-[10px] font-bold uppercase text-gray-500 w-3 shrink-0">{field}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            value={parseFloat(r[field].toFixed(1))}
+                            onChange={(e) => updateRegionField(r.id, field, e.target.value)}
+                            className="w-full bg-transparent text-[11px] font-mono text-white outline-none min-w-0"
+                          />
+                          <span className="text-[9px] text-gray-600 shrink-0">px</span>
+                        </label>
+                      ))}
                     </div>
 
                     <div className="px-3 pb-2">
