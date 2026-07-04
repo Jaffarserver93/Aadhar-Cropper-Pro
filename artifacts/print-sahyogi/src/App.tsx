@@ -7,19 +7,45 @@ import AadhaarCropPage from '@/pages/AadhaarCropPage';
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
 import CodeGenerator from '@/pages/CodeGenerator';
-import { Route, Switch, Router as WouterRouter } from 'wouter';
-import { AuthProvider } from '@/contexts/AuthContext';
+import { Route, Switch, Router as WouterRouter, useLocation } from 'wouter';
+import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import React, { useEffect } from 'react';
 
 const queryClient = new QueryClient();
+
+function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
+  const { user, loading } = useAuth();
+  const [, navigate] = useLocation();
+
+  useEffect(() => {
+    if (!loading && !user) {
+      navigate('/login');
+    }
+  }, [user, loading, navigate]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) return null;
+
+  return <Component />;
+}
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
-      <Route path="/aadhaar/crop" component={AadhaarCropPage} />
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
       <Route path="/code-generator" component={CodeGenerator} />
+      <Route path="/aadhaar/crop">
+        {() => <ProtectedRoute component={AadhaarCropPage} />}
+      </Route>
       <Route component={NotFound} />
     </Switch>
   );
