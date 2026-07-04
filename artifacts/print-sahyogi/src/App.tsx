@@ -7,6 +7,7 @@ import AadhaarCropPage from '@/pages/AadhaarCropPage';
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
 import CodeGenerator from '@/pages/CodeGenerator';
+import DemoPDF from '@/pages/DemoPDF';
 import { Route, Switch, Router as WouterRouter, useLocation } from 'wouter';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import React, { useEffect } from 'react';
@@ -43,6 +44,7 @@ function Router() {
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
       <Route path="/code-generator" component={CodeGenerator} />
+      <Route path="/demopdf" component={DemoPDF} />
       <Route path="/aadhaar/crop">
         {() => <ProtectedRoute component={AadhaarCropPage} />}
       </Route>
