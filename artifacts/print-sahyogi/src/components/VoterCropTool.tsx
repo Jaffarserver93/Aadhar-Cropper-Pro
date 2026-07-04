@@ -30,10 +30,10 @@ const FRONT_CROP_PDF = { x: 127, y: 369.75, w: 952, h: 598 } as const;
 const BACK_CROP_PDF  = { x: 1272, y: 369.75, w: 952, h: 598 } as const;
 
 // Quality render scale for the crop output.
-// Voter ID cards are ~3.8× wider in PDF space than Aadhaar cards (952 vs 248 PDF units).
-// Scale 13 gives ~12 376 × 7 774 px per card — equivalent to Aadhaar's quality at scale 50.
-// Scale 45 would produce a 42 840 px-wide canvas and crash the browser.
-const CROP_SCALE = 13;
+// Voter ID cards are ~3.8× wider in PDF space than Aadhaar (952 vs 248 PDF units).
+// Scale 20 → 19 040 × 11 960 px per card (~228 M pixels), just within Chrome's 268 M limit.
+// Scale 40 → 911 M pixels — exceeds browser canvas limits, produces a blank output.
+const CROP_SCALE = 20;
 
 type Step = 1 | 2 | 3 | 4 | 5;
 
