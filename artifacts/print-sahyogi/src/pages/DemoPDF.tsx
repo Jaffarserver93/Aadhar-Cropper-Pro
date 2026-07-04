@@ -84,10 +84,10 @@ export default function DemoPDF() {
     setLoading(false);
   }, []);
 
-  // ── Load PDF from data URL ─────────────────────────────────────────────────
-  const loadPDF = useCallback(async (dataUrl: string) => {
+  // ── Load PDF from ArrayBuffer ──────────────────────────────────────────────
+  const loadPDF = useCallback(async (buffer: ArrayBuffer) => {
     setLoading(true);
-    const pdf = await pdfjsLib.getDocument(dataUrl).promise;
+    const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
     pdfRef.current = pdf;
     setNumPages(pdf.numPages);
     setCurrentPage(1);
@@ -102,13 +102,9 @@ export default function DemoPDF() {
   // ── File handling ──────────────────────────────────────────────────────────
   const handleFile = async (file: File) => {
     if (file.type !== 'application/pdf') return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const url = e.target?.result as string;
-      setPdfDataUrl(url);
-      loadPDF(url);
-    };
-    reader.readAsDataURL(file);
+    const buffer = await file.arrayBuffer();
+    setPdfDataUrl(file.name); // just store name for display tracking
+    loadPDF(buffer);
   };
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
