@@ -37,7 +37,7 @@ export function Hero() {
           transition={{ duration: 0.5, delay: 0.1 }}
           className="text-4xl md:text-6xl lg:text-7xl font-extrabold tracking-tight mb-6"
         >
-          Print Your Aadhaar,<br className="hidden md:block" /> the <span className="text-accent">Smart Way</span>
+          Print Your Card's,<br className="hidden md:block" /> the <span className="text-accent">Smart Way</span>
         </motion.h1>
 
         <motion.p
