@@ -21,8 +21,18 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).href;
 
+// Coordinates in RENDER_SCALE=2 canvas space (from DemoPDF)
 const FRONT_CROP = { x: 254.000, y: 739.500, w: 1904.000, h: 1196.000 } as const;
 const BACK_CROP  = { x: 2544.000, y: 739.500, w: 1904.000, h: 1196.000 } as const;
+
+// PDF-unit coordinates (divide by RENDER_SCALE=2) used for high-quality re-render
+const FRONT_CROP_PDF = { x: 127, y: 369.75, w: 952, h: 598 } as const;
+const BACK_CROP_PDF  = { x: 1272, y: 369.75, w: 952, h: 598 } as const;
+
+// Quality render scale for the crop output. 3.5 gives ~3332×2093 px per card
+// (safe: uses viewport-offset trick so only the crop region is rendered, not the full page).
+// Literal 35 would produce a 33 320 px-wide canvas which crashes browsers.
+const CROP_SCALE = 3.5;
 
 type Step = 1 | 2 | 3 | 4 | 5;
 
@@ -135,8 +145,7 @@ export function VoterCropTool() {
     return canvas;
   };
 
-  // Crop directly from the already-rendered preview canvas — avoids enormous
-  // intermediate canvases that would result from re-rendering at a high scale.
+  // Crop directly from the already-rendered preview canvas (used for overlay preview).
   const cropFromCanvas = (
     src: HTMLCanvasElement,
     crop: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
@@ -150,6 +159,26 @@ export function VoterCropTool() {
     ctx.fillRect(0, 0, sw, sh);
     ctx.drawImage(src, sx, sy, sw, sh, 0, 0, sw, sh);
     return out;
+  };
+
+  // High-quality crop: renders ONLY the crop region at CROP_SCALE via viewport
+  // offset — the full page is never allocated, so the canvas stays small.
+  const renderCropRegion = async (
+    page: pdfjsLib.PDFPageProxy,
+    cropPdf: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
+  ) => {
+    const pw = Math.ceil(cropPdf.w * CROP_SCALE);
+    const ph = Math.ceil(cropPdf.h * CROP_SCALE);
+    const offsetX = -Math.floor(cropPdf.x * CROP_SCALE);
+    const offsetY = -Math.floor(cropPdf.y * CROP_SCALE);
+    const viewport = page.getViewport({ scale: CROP_SCALE, offsetX, offsetY });
+    const canvas = document.createElement('canvas');
+    canvas.width = pw; canvas.height = ph;
+    const ctx = canvas.getContext('2d', { alpha: false })!;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, pw, ph);
+    await page.render({ canvasContext: ctx, canvas, viewport, intent: 'print' }).promise;
+    return canvas;
   };
 
   const attemptLoadPDF = async (pdfPassword?: string) => {
@@ -209,10 +238,12 @@ export function VoterCropTool() {
     return out;
   };
 
-  const extractSinglePageCards = () => {
-    const src = pageCanvasRef.current!;
-    const front = cropFromCanvas(src, FRONT_CROP);
-    const back  = cropFromCanvas(src, BACK_CROP);
+  const extractSinglePageCards = async () => {
+    const page = await pdfDocRef.current!.getPage(1);
+    const [front, back] = await Promise.all([
+      renderCropRegion(page, FRONT_CROP_PDF),
+      renderCropRegion(page, BACK_CROP_PDF),
+    ]);
     return [front.toDataURL('image/png'), back.toDataURL('image/png')];
   };
 
@@ -220,7 +251,7 @@ export function VoterCropTool() {
     try {
       const images: string[] = [];
       if (pdf.numPages === 1) {
-        images.push(...extractSinglePageCards());
+        images.push(...(await extractSinglePageCards()));
       } else {
         for (let i = 1; i <= Math.min(pdf.numPages, 2); i++) {
           const page = await pdf.getPage(i);
