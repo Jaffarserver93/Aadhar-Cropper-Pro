@@ -37,18 +37,18 @@ const tools: Tool[] = [
   {
     id: 'voter',
     name: 'Voter ID Card',
-    description: 'Crop and format your Voter ID for clean, standard-size printing on A4 paper.',
-    badge: 'Coming Soon',
-    route: null,
-    available: false,
+    description: 'Auto-crop both sides of your Voter ID PDF and get a print-ready A4 layout instantly.',
+    badge: 'Available Now',
+    route: '/voter-id-card/crop',
+    available: true,
     icon: (
       <svg viewBox="0 0 48 48" fill="none" className="w-10 h-10" xmlns="http://www.w3.org/2000/svg">
-        <rect width="48" height="48" rx="10" fill="#64748b" />
-        <rect x="6" y="14" width="36" height="20" rx="3" fill="white" opacity="0.1" />
-        <rect x="6" y="14" width="36" height="20" rx="3" stroke="white" strokeWidth="1.5" opacity="0.5" />
-        <path d="M22 26l-3-3 1.4-1.4 1.6 1.6 4-4L27.4 20.6 22 26z" fill="white" opacity="0.5" />
-        <rect x="28" y="21" width="8" height="2" rx="1" fill="white" opacity="0.4" />
-        <rect x="28" y="25" width="6" height="2" rx="1" fill="white" opacity="0.3" />
+        <rect width="48" height="48" rx="10" fill="hsl(222 72% 18%)" />
+        <rect x="6" y="14" width="36" height="20" rx="3" fill="white" opacity="0.15" />
+        <rect x="6" y="14" width="36" height="20" rx="3" stroke="white" strokeWidth="1.5" />
+        <path d="M22 26l-3-3 1.4-1.4 1.6 1.6 4-4L27.4 20.6 22 26z" fill="#f59e0b" />
+        <rect x="28" y="21" width="8" height="2" rx="1" fill="white" opacity="0.8" />
+        <rect x="28" y="25" width="6" height="2" rx="1" fill="white" opacity="0.5" />
       </svg>
     ),
   },

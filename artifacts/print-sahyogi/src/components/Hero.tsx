@@ -59,7 +59,7 @@ export function Hero() {
             onClick={scrollToTool}
             className="flex items-center justify-center space-x-2 bg-accent text-primary px-8 py-4 rounded-full font-bold text-lg hover:bg-amber-400 hover:scale-105 transition-all shadow-xl shadow-accent/20"
           >
-            <span>Crop Aadhaar Now</span>
+            <span>Crop PVC Card's Now</span>
             <ArrowRight className="h-5 w-5" />
           </button>
         </motion.div>

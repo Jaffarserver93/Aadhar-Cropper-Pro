@@ -21,10 +21,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).href;
 
-// ── TODO: Replace these with the actual positions you provide ─────────────────
-const FRONT_CROP = { x: 0, y: 0, w: 400, h: 250 } as const;
-const BACK_CROP  = { x: 0, y: 260, w: 400, h: 250 } as const;
-// ─────────────────────────────────────────────────────────────────────────────
+const FRONT_CROP = { x: 254.000, y: 739.500, w: 1904.000, h: 1196.000 } as const;
+const BACK_CROP  = { x: 2544.000, y: 739.500, w: 1904.000, h: 1196.000 } as const;
 
 type Step = 1 | 2 | 3 | 4 | 5;
 
