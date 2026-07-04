@@ -1,0 +1,1 @@
+- [Vercel monorepo build](vercel-monorepo-build.md) — outputDirectory resolves relative to package CWD, not repo root; dist is gitignored so use `build/` as outDir name.

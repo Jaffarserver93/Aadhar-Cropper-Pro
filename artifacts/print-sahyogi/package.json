@@ -75,6 +75,7 @@
     "zod": "catalog:"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.110.0",
     "pdfjs-dist": "^6.1.200"
   }
 }
