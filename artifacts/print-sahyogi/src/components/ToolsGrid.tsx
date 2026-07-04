@@ -1,7 +1,8 @@
 import React from 'react';
 import { useLocation } from 'wouter';
 import { motion } from 'framer-motion';
-import { ArrowRight, Clock } from 'lucide-react';
+import { ArrowRight, Clock, Lock } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Tool {
   id: string;
@@ -140,11 +141,12 @@ const cardVariants = {
 
 export function ToolsGrid() {
   const [, navigate] = useLocation();
+  const { user, loading } = useAuth();
+  const isLoggedIn = !loading && Boolean(user);
 
   return (
     <section id="tools" className="py-20 bg-gray-50">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
         <div className="text-center mb-14">
           <span className="inline-block text-xs font-semibold tracking-widest text-accent uppercase mb-3">
             Document Tools
@@ -155,9 +157,14 @@ export function ToolsGrid() {
           <p className="mt-3 text-gray-500 max-w-lg mx-auto text-base">
             Select a document type to crop, format, and prepare a print-ready layout — all inside your browser.
           </p>
+          {!loading && !isLoggedIn && (
+            <div className="mt-4 inline-flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-700 text-sm font-medium px-4 py-2 rounded-full">
+              <Lock className="w-3.5 h-3.5" />
+              Sign in to unlock the tools
+            </div>
+          )}
         </div>
 
-        {/* Grid */}
         <motion.div
           variants={containerVariants}
           initial="hidden"
@@ -167,16 +174,23 @@ export function ToolsGrid() {
         >
           {tools.map((tool) => (
             <motion.div key={tool.id} variants={cardVariants}>
-              {tool.available ? (
+              {tool.available && isLoggedIn ? (
                 <button
                   onClick={() => navigate(tool.route!)}
                   className="group w-full text-left bg-white border-2 border-primary/10 hover:border-accent rounded-2xl p-6 transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2"
                 >
-                  <ToolCardInner tool={tool} available />
+                  <ToolCardInner tool={tool} state="active" />
+                </button>
+              ) : tool.available && !isLoggedIn ? (
+                <button
+                  onClick={() => navigate('/login')}
+                  className="group w-full text-left bg-white border-2 border-primary/10 hover:border-amber-400 rounded-2xl p-6 transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-amber-300 focus:ring-offset-2 relative overflow-hidden"
+                >
+                  <ToolCardInner tool={tool} state="locked" />
                 </button>
               ) : (
                 <div className="w-full text-left bg-white border-2 border-gray-100 rounded-2xl p-6 opacity-60 cursor-not-allowed select-none">
-                  <ToolCardInner tool={tool} available={false} />
+                  <ToolCardInner tool={tool} state="soon" />
                 </div>
               )}
             </motion.div>
@@ -187,19 +201,35 @@ export function ToolsGrid() {
   );
 }
 
-function ToolCardInner({ tool, available }: { tool: Tool; available: boolean }) {
+function ToolCardInner({ tool, state }: { tool: Tool; state: 'active' | 'locked' | 'soon' }) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-start justify-between mb-4">
-        <div className="shrink-0">{tool.icon}</div>
+        <div className="shrink-0 relative">
+          {tool.icon}
+          {state === 'locked' && (
+            <div className="absolute -bottom-1 -right-1 bg-amber-400 rounded-full p-0.5">
+              <Lock className="w-2.5 h-2.5 text-white" />
+            </div>
+          )}
+        </div>
         <span
           className={`text-xs font-semibold px-3 py-1 rounded-full ${
-            available
+            state === 'active'
               ? 'bg-accent/10 text-accent'
+              : state === 'locked'
+              ? 'bg-amber-50 text-amber-600'
               : 'bg-gray-100 text-gray-400'
           }`}
         >
-          {available ? tool.badge : (
+          {state === 'active' && tool.badge}
+          {state === 'locked' && (
+            <span className="flex items-center gap-1">
+              <Lock className="w-3 h-3" />
+              Sign in to use
+            </span>
+          )}
+          {state === 'soon' && (
             <span className="flex items-center gap-1">
               <Clock className="w-3 h-3" />
               {tool.badge}
@@ -210,16 +240,25 @@ function ToolCardInner({ tool, available }: { tool: Tool; available: boolean }) 
 
       <h3
         className={`text-lg font-bold mb-2 ${
-          available ? 'text-primary group-hover:text-accent transition-colors' : 'text-gray-400'
+          state === 'active'
+            ? 'text-primary group-hover:text-accent transition-colors'
+            : state === 'locked'
+            ? 'text-primary group-hover:text-amber-600 transition-colors'
+            : 'text-gray-400'
         }`}
       >
         {tool.name}
       </h3>
       <p className="text-sm text-gray-500 leading-relaxed flex-1">{tool.description}</p>
 
-      {available && (
+      {state === 'active' && (
         <div className="mt-4 flex items-center text-sm font-semibold text-accent gap-1 group-hover:gap-2 transition-all">
           Open Tool <ArrowRight className="w-4 h-4" />
+        </div>
+      )}
+      {state === 'locked' && (
+        <div className="mt-4 flex items-center text-sm font-semibold text-amber-500 gap-1 group-hover:gap-2 transition-all">
+          Sign in to unlock <ArrowRight className="w-4 h-4" />
         </div>
       )}
     </div>

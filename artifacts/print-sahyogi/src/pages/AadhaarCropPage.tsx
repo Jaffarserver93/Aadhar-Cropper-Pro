@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useLocation } from 'wouter';
 import { ArrowLeft } from 'lucide-react';
 import { Navbar } from '@/components/Navbar';
@@ -7,6 +7,10 @@ import { AadhaarCropTool } from '@/components/AadhaarCropTool';
 
 export default function AadhaarCropPage() {
   const [, navigate] = useLocation();
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, []);
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
