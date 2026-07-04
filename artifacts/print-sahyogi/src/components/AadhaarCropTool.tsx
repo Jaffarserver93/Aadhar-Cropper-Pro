@@ -29,13 +29,20 @@ const BACK_CROP  = { x: 626.773, y: 1149.72, w: 497.067, h: 313.6 } as const;
 
 /**
  * Profile photo region within the front Aadhaar card (proportional 0–1).
- * Works for most standard Aadhaar card formats — photo is on the right side.
+ * Derived from absolute DemoPDF coordinates: { x: 144.5, y: 1215.5, w: 103.4, h: 126.4 }
+ * Relative to FRONT_CROP: (abs - front_origin) / front_size
  */
-const PROFILE_REGION = { x: 0.685, y: 0.220, w: 0.215, h: 0.630 };
+const PROFILE_REGION = {
+  x: (144.5  - FRONT_CROP.x) / FRONT_CROP.w,  // ≈ 0.087
+  y: (1215.5 - FRONT_CROP.y) / FRONT_CROP.h,  // ≈ 0.210
+  w: 103.4 / FRONT_CROP.w,                     // ≈ 0.208
+  h: 126.4 / FRONT_CROP.h,                     // ≈ 0.403
+};
 
-const DEFAULT_BRIGHTNESS = 18;
-const DEFAULT_CONTRAST   = -25;
-const DEFAULT_EXPOSURE   = -30;
+const DEFAULT_BRIGHTNESS  = 18;
+const DEFAULT_CONTRAST    = -25;
+const DEFAULT_EXPOSURE    = -30;
+const DEFAULT_SATURATION  = 0;
 
 type Step = 1 | 2 | 3 | 4 | 5;
 
@@ -45,25 +52,36 @@ function applyAdjustmentsToImageData(
   brightness: number,
   contrast: number,
   exposure: number,
+  saturation: number,
 ) {
   const expMul = Math.pow(2, exposure / 50);
   const briOff = (brightness / 100) * 128;
   const conFac = (contrast + 100) / 100;
+  const satFac = (saturation + 100) / 100; // -100→0 (grey), 0→1 (normal), 100→2 (vivid)
 
   for (let i = 0; i < data.length; i += 4) {
     let r = data[i], g = data[i + 1], b = data[i + 2];
 
+    // Exposure
     r = Math.min(255, Math.max(0, r * expMul));
     g = Math.min(255, Math.max(0, g * expMul));
     b = Math.min(255, Math.max(0, b * expMul));
 
+    // Brightness
     r = Math.min(255, Math.max(0, r + briOff));
     g = Math.min(255, Math.max(0, g + briOff));
     b = Math.min(255, Math.max(0, b + briOff));
 
+    // Contrast
     r = Math.min(255, Math.max(0, (r - 128) * conFac + 128));
     g = Math.min(255, Math.max(0, (g - 128) * conFac + 128));
     b = Math.min(255, Math.max(0, (b - 128) * conFac + 128));
+
+    // Saturation (luma-weighted)
+    const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+    r = Math.min(255, Math.max(0, luma + satFac * (r - luma)));
+    g = Math.min(255, Math.max(0, luma + satFac * (g - luma)));
+    b = Math.min(255, Math.max(0, luma + satFac * (b - luma)));
 
     data[i] = r; data[i + 1] = g; data[i + 2] = b;
   }
@@ -151,9 +169,10 @@ export function AadhaarCropTool() {
 
   // Profile photo adjustment state
   const [profilePhotoUrl, setProfilePhotoUrl] = useState<string | null>(null);
-  const [brightness, setBrightness] = useState(DEFAULT_BRIGHTNESS);
-  const [contrast,   setContrast]   = useState(DEFAULT_CONTRAST);
-  const [exposure,   setExposure]   = useState(DEFAULT_EXPOSURE);
+  const [brightness,  setBrightness]  = useState(DEFAULT_BRIGHTNESS);
+  const [contrast,    setContrast]    = useState(DEFAULT_CONTRAST);
+  const [exposure,    setExposure]    = useState(DEFAULT_EXPOSURE);
+  const [saturation,  setSaturation]  = useState(DEFAULT_SATURATION);
   const [adjustedFrontUrl, setAdjustedFrontUrl] = useState<string | null>(null);
   const [isApplying, setIsApplying] = useState(false);
   const [adjustmentsApplied, setAdjustmentsApplied] = useState(false);
@@ -172,8 +191,9 @@ export function AadhaarCropTool() {
     const bri = 1 + brightness / 100;
     const con = (contrast + 100) / 100;
     const exp = Math.pow(2, exposure / 50);
-    return `brightness(${(bri * exp).toFixed(3)}) contrast(${con.toFixed(3)})`;
-  }, [brightness, contrast, exposure]);
+    const sat = (saturation + 100) / 100;
+    return `brightness(${(bri * exp).toFixed(3)}) contrast(${con.toFixed(3)}) saturate(${sat.toFixed(3)})`;
+  }, [brightness, contrast, exposure, saturation]);
 
   const updateOverlay = useCallback(() => {
     if (!previewWrapperRef.current || pageCanvasWidth === 0) return;
@@ -237,7 +257,7 @@ export function AadhaarCropTool() {
     const ph = Math.floor(h * img.height);
 
     const imageData = ctx.getImageData(px, py, pw, ph);
-    applyAdjustmentsToImageData(imageData.data, brightness, contrast, exposure);
+    applyAdjustmentsToImageData(imageData.data, brightness, contrast, exposure, saturation);
     ctx.putImageData(imageData, px, py);
 
     const newFrontUrl = canvas.toDataURL('image/png');
@@ -468,7 +488,7 @@ export function AadhaarCropTool() {
     setFrontImage(null); setBackImage(null); setPreviewDataUrl(null);
     setPagePreviewDataUrl(null); setPageCanvasWidth(0); setCropBoxes(null);
     setProfilePhotoUrl(null); setAdjustedFrontUrl(null); setAdjustmentsApplied(false);
-    setBrightness(DEFAULT_BRIGHTNESS); setContrast(DEFAULT_CONTRAST); setExposure(DEFAULT_EXPOSURE);
+    setBrightness(DEFAULT_BRIGHTNESS); setContrast(DEFAULT_CONTRAST); setExposure(DEFAULT_EXPOSURE); setSaturation(DEFAULT_SATURATION);
     pdfDocRef.current = null; pageCanvasRef.current = null;
   };
 
@@ -651,13 +671,14 @@ export function AadhaarCropTool() {
 
               {/* Sliders */}
               <div className="flex-1 w-full space-y-5">
-                <SliderRow label="Brightness" value={brightness} min={-100} max={100} onChange={setBrightness} />
-                <SliderRow label="Contrast"   value={contrast}   min={-100} max={100} onChange={setContrast} />
-                <SliderRow label="Exposure"   value={exposure}   min={-100} max={100} onChange={setExposure} />
+                <SliderRow label="Brightness" value={brightness}  min={-100} max={100} onChange={setBrightness} />
+                <SliderRow label="Contrast"   value={contrast}    min={-100} max={100} onChange={setContrast} />
+                <SliderRow label="Exposure"   value={exposure}    min={-100} max={100} onChange={setExposure} />
+                <SliderRow label="Saturation" value={saturation}  min={-100} max={100} onChange={setSaturation} />
 
                 <div className="flex gap-3 pt-2">
                   <button
-                    onClick={() => { setBrightness(DEFAULT_BRIGHTNESS); setContrast(DEFAULT_CONTRAST); setExposure(DEFAULT_EXPOSURE); setAdjustmentsApplied(false); setAdjustedFrontUrl(null); }}
+                    onClick={() => { setBrightness(DEFAULT_BRIGHTNESS); setContrast(DEFAULT_CONTRAST); setExposure(DEFAULT_EXPOSURE); setSaturation(DEFAULT_SATURATION); setAdjustmentsApplied(false); setAdjustedFrontUrl(null); }}
                     className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-medium transition"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />Reset
