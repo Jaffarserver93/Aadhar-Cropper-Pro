@@ -22,12 +22,12 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).href;
 
 // Coordinates in RENDER_SCALE=2 canvas space (from DemoPDF)
-const FRONT_CROP = { x: 254.000, y: 739.500, w: 1904.000, h: 1196.000 } as const;
-const BACK_CROP  = { x: 2544.000, y: 739.500, w: 1904.000, h: 1196.000 } as const;
+const FRONT_CROP = { x: 254.000, y: 738, w: 1904.000, h: 1196.000 } as const;
+const BACK_CROP  = { x: 2544.000, y: 738, w: 1904.000, h: 1196.000 } as const;
 
 // PDF-unit coordinates (divide by RENDER_SCALE=2) used for high-quality re-render
-const FRONT_CROP_PDF = { x: 127, y: 369.75, w: 952, h: 598 } as const;
-const BACK_CROP_PDF  = { x: 1272, y: 369.75, w: 952, h: 598 } as const;
+const FRONT_CROP_PDF = { x: 127, y: 369, w: 952, h: 598 } as const;
+const BACK_CROP_PDF  = { x: 1272, y: 369, w: 952, h: 598 } as const;
 
 // Quality render scale for the crop output.
 // Voter ID cards are ~3.8× wider in PDF space than Aadhaar (952 vs 248 PDF units).
