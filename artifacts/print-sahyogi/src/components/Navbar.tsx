@@ -71,7 +71,7 @@ export function Navbar() {
               <div className="flex items-center gap-3">
                 <span className="text-xs text-gray-400 flex items-center gap-1">
                   <User className="h-3.5 w-3.5" />
-                  {user.email?.split('@')[0]}
+                  {user.username}
                 </span>
                 <button
                   onClick={handleSignOut}
@@ -138,7 +138,7 @@ export function Navbar() {
                     className="w-full flex items-center justify-center gap-2 border border-gray-200 text-gray-700 px-5 py-3 rounded-full font-semibold transition-colors hover:bg-gray-50"
                   >
                     <LogOut className="h-4 w-4" />
-                    Sign out ({user.email?.split('@')[0]})
+                    Sign out ({user.username})
                   </button>
                 ) : (
                   <button
