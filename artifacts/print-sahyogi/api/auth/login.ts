@@ -15,7 +15,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!username || !password)
     return res.status(400).json({ error: 'Username and password are required.' });
 
-  const base = process.env.SUPABASE_URL!;
+  const base = (process.env.VITE_SUPABASE_URL ?? process.env.SUPABASE_URL)!;
   const clean = username.trim().toLowerCase();
 
   const r = await fetch(

@@ -21,7 +21,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (password.length < 6)
     return res.status(400).json({ error: 'Password must be at least 6 characters.' });
 
-  const base = process.env.SUPABASE_URL!;
+  const base = (process.env.VITE_SUPABASE_URL ?? process.env.SUPABASE_URL)!;
 
   // Check existing
   const checkRes = await fetch(
