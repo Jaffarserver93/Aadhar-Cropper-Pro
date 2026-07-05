@@ -28,9 +28,9 @@ export function Navbar() {
     }
   };
 
-  const handleSignOut = async () => {
+  const handleSignOut = () => {
     setIsMobileMenuOpen(false);
-    await signOut();
+    signOut();
     navigate('/login');
   };
 

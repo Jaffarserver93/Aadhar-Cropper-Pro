@@ -1,16 +1,15 @@
 import React, { useState } from 'react';
 import { useLocation } from 'wouter';
-import { Printer, Eye, EyeOff, Loader2, MailCheck } from 'lucide-react';
+import { Printer, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function Login() {
   const { signIn, user } = useAuth();
   const [, navigate] = useLocation();
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState('');
-  const [needsConfirm, setNeedsConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
 
   if (user) {
@@ -21,20 +20,11 @@ export default function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setNeedsConfirm(false);
     setLoading(true);
-    const { error } = await signIn(email, password);
+    const { error } = await signIn(username.trim(), password);
     setLoading(false);
-
     if (error) {
-      if (
-        error.toLowerCase().includes('email not confirmed') ||
-        error.toLowerCase().includes('not confirmed')
-      ) {
-        setNeedsConfirm(true);
-      } else {
-        setError(error);
-      }
+      setError(error);
     } else {
       navigate('/');
     }
@@ -52,19 +42,6 @@ export default function Login() {
             <p className="text-gray-500 text-sm mt-1">Sign in to your account</p>
           </div>
 
-          {needsConfirm && (
-            <div className="mb-4 px-4 py-4 bg-blue-50 border border-blue-200 text-blue-800 text-sm rounded-lg flex gap-3">
-              <MailCheck className="h-5 w-5 shrink-0 mt-0.5 text-blue-500" />
-              <div>
-                <p className="font-semibold mb-1">Email confirmation required</p>
-                <p className="text-blue-700 text-xs">
-                  Check your inbox for a confirmation link and click it to activate your account.
-                  If you didn't receive it, ask the admin to disable email confirmation in Supabase.
-                </p>
-              </div>
-            </div>
-          )}
-
           {error && (
             <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
               {error}
@@ -74,15 +51,16 @@ export default function Login() {
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Email address
+                Username
               </label>
               <input
-                type="email"
+                type="text"
                 required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition"
-                placeholder="you@example.com"
+                placeholder="your_username"
+                autoComplete="username"
               />
             </div>
 
@@ -98,6 +76,7 @@ export default function Login() {
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-4 py-2.5 pr-10 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition"
                   placeholder="••••••••"
+                  autoComplete="current-password"
                 />
                 <button
                   type="button"

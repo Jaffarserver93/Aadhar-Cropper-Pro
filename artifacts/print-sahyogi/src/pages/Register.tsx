@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useLocation } from 'wouter';
-import { Printer, Eye, EyeOff, Loader2, CheckCircle, MailCheck } from 'lucide-react';
+import { Printer, Eye, EyeOff, Loader2, CheckCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { customRegister } from '@/lib/auth';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function Register() {
@@ -9,12 +10,12 @@ export default function Register() {
   const [, navigate] = useLocation();
 
   const [code, setCode] = useState('');
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState<'confirmed' | 'pending_email' | null>(null);
+  const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
 
   if (user) {
@@ -42,7 +43,7 @@ export default function Register() {
     setLoading(true);
     const trimmedCode = code.trim().toUpperCase();
 
-    // Step 1: Validate code
+    // Step 1: Validate invite code via Supabase
     const { data: codeRow, error: codeError } = await supabase
       .from('registration_codes')
       .select('id, is_used')
@@ -56,12 +57,12 @@ export default function Register() {
       return;
     }
 
-    // Step 2: Mark code as used BEFORE creating account (prevents race condition / reuse)
+    // Step 2: Mark code as used
     const { error: markError } = await supabase
       .from('registration_codes')
       .update({ is_used: true, used_at: new Date().toISOString() })
       .eq('id', codeRow.id)
-      .eq('is_used', false); // double-check it's still unused at update time
+      .eq('is_used', false);
 
     if (markError) {
       setError('This invite code was just used by someone else. Please get a new code.');
@@ -69,71 +70,39 @@ export default function Register() {
       return;
     }
 
-    // Step 3: Create user account
-    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-    });
+    // Step 3: Register user via API server
+    const { user: newUser, error: regError } = await customRegister(username, password);
 
-    if (signUpError || !signUpData.user) {
-      // Rollback: unmark the code so it can be used again
+    if (regError || !newUser) {
+      // Rollback: unmark the code
       await supabase
         .from('registration_codes')
         .update({ is_used: false, used_at: null })
         .eq('id', codeRow.id);
 
-      setError(signUpError?.message ?? 'Registration failed. Please try again.');
+      setError(regError ?? 'Registration failed. Please try again.');
       setLoading(false);
       return;
     }
 
-    // Step 4: Save user ID on the code row
+    // Step 4: Link user ID to invite code
     await supabase
       .from('registration_codes')
-      .update({ used_by: signUpData.user.id })
+      .update({ used_by: newUser.id })
       .eq('id', codeRow.id);
 
     setLoading(false);
-
-    // If Supabase email confirmation is ON, session will be null
-    if (!signUpData.session) {
-      setSuccess('pending_email');
-    } else {
-      setSuccess('confirmed');
-    }
+    setSuccess(true);
   };
 
-  if (success === 'confirmed') {
+  if (success) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center px-4">
         <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 text-center">
           <CheckCircle className="h-14 w-14 text-green-500 mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Account Created!</h2>
           <p className="text-gray-500 text-sm mb-6">
-            Your account has been created. You can now sign in.
-          </p>
-          <a
-            href="/login"
-            className="inline-block bg-primary text-white px-6 py-2.5 rounded-lg font-semibold text-sm hover:bg-primary/90 transition"
-          >
-            Go to Login
-          </a>
-        </div>
-      </div>
-    );
-  }
-
-  if (success === 'pending_email') {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center px-4">
-        <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 text-center">
-          <MailCheck className="h-14 w-14 text-blue-500 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Check Your Email</h2>
-          <p className="text-gray-500 text-sm mb-3">
-            A confirmation link has been sent to <strong>{email}</strong>.
-          </p>
-          <p className="text-gray-400 text-xs mb-6">
-            Click the link in the email to activate your account, then come back to sign in.
+            You're all set. Go sign in with your username and password.
           </p>
           <a
             href="/login"
@@ -182,16 +151,20 @@ export default function Register() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Email address
+                Username
               </label>
               <input
-                type="email"
+                type="text"
                 required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={username}
+                onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition"
-                placeholder="you@example.com"
+                placeholder="your_username"
+                minLength={3}
+                maxLength={20}
+                autoComplete="username"
               />
+              <p className="text-xs text-gray-400 mt-1">3–20 characters: letters, numbers, underscores</p>
             </div>
 
             <div>
@@ -206,6 +179,7 @@ export default function Register() {
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-4 py-2.5 pr-10 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition"
                   placeholder="At least 6 characters"
+                  autoComplete="new-password"
                 />
                 <button
                   type="button"
@@ -228,6 +202,7 @@ export default function Register() {
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition"
                 placeholder="Re-enter password"
+                autoComplete="new-password"
               />
             </div>
 
