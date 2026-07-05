@@ -3,6 +3,7 @@ const AUTH_KEY = 'ezone_auth';
 export interface AppUser {
   id: string;
   username: string;
+  role: 'user' | 'admin';
 }
 
 // ── Storage ───────────────────────────────────────────────────────────────────

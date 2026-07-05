@@ -37,10 +37,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: user, error } = await supabase
     .from('app_users')
     .insert({ username: clean, password_hash: sha256(password) })
-    .select('id, username')
+    .select('id, username, role')
     .single();
 
   if (error || !user) return res.status(500).json({ error: 'Registration failed. Try again.' });
 
-  return res.json({ user: { id: user.id, username: user.username } });
+  return res.json({ user: { id: user.id, username: user.username, role: user.role } });
 }

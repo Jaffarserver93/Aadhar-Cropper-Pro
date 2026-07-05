@@ -29,9 +29,9 @@ router.post("/auth/register", async (req, res) => {
   const [user] = await db
     .insert(appUsers)
     .values({ username: clean, passwordHash: sha256(password) })
-    .returning({ id: appUsers.id, username: appUsers.username });
+    .returning({ id: appUsers.id, username: appUsers.username, role: appUsers.role });
 
-  return res.json({ user: { id: user.id, username: user.username } });
+  return res.json({ user: { id: user.id, username: user.username, role: user.role } });
 });
 
 // POST /api/auth/login
@@ -50,7 +50,7 @@ router.post("/auth/login", async (req, res) => {
   if (!user || user.passwordHash !== sha256(password))
     return res.status(401).json({ error: "Invalid username or password." });
 
-  return res.json({ user: { id: user.id, username: user.username } });
+  return res.json({ user: { id: user.id, username: user.username, role: user.role } });
 });
 
 export default router;

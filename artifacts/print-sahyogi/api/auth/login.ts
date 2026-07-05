@@ -26,5 +26,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!user || user.password_hash !== sha256(password))
     return res.status(401).json({ error: 'Invalid username or password.' });
 
-  return res.json({ user: { id: user.id, username: user.username } });
+  return res.json({ user: { id: user.id, username: user.username, role: user.role } });
 }
