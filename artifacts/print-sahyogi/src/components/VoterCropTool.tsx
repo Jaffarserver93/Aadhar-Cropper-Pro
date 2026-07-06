@@ -21,13 +21,28 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).href;
 
-// Coordinates in RENDER_SCALE=2 canvas space (from DemoPDF)
-const FRONT_CROP = { x: 254.000, y: 740, w: 1904.000, h: 1196.000 } as const;
-const BACK_CROP  = { x: 2544.000, y: 740, w: 1904.000, h: 1196.000 } as const;
+// ── Wide format (standard e-EPIC landscape/wide PDF) ─────────────────────────
+// Coordinates in RENDER_SCALE=2 canvas space
+const FRONT_CROP_WIDE     = { x: 254,    y: 740, w: 1904, h: 1196 } as const;
+const BACK_CROP_WIDE      = { x: 2544,   y: 740, w: 1904, h: 1196 } as const;
+// PDF-unit coordinates for high-quality re-render
+const FRONT_CROP_PDF_WIDE = { x: 127,    y: 370, w: 952,  h: 598  } as const;
+const BACK_CROP_PDF_WIDE  = { x: 1272,   y: 370, w: 952,  h: 598  } as const;
 
-// PDF-unit coordinates (divide by RENDER_SCALE=2) used for high-quality re-render
-const FRONT_CROP_PDF = { x: 127, y: 370, w: 952, h: 598 } as const;
-const BACK_CROP_PDF  = { x: 1272, y: 370, w: 952, h: 598 } as const;
+// ── Portrait A4 format (595×842 PDF units — newer e-EPIC single-page layout) ─
+// Card images placed at Im1(32.5,593) and Im2(327,593) with w=245 h=154 PDF units
+// Screen coords (scale 2, top-left origin): y = (842−593−154)×2 = 190
+const FRONT_CROP_PORT     = { x: 65,     y: 190, w: 490,  h: 308  } as const;
+const BACK_CROP_PORT      = { x: 654,    y: 190, w: 490,  h: 308  } as const;
+const FRONT_CROP_PDF_PORT = { x: 32.5,   y: 95,  w: 245,  h: 154  } as const;
+const BACK_CROP_PDF_PORT  = { x: 327,    y: 95,  w: 245,  h: 154  } as const;
+
+type CropSet = {
+  front:    { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  back:     { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  frontPdf: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  backPdf:  { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+};
 
 // Quality render scale for the crop output.
 // Voter ID cards are ~3.8× wider in PDF space than Aadhaar (952 vs 248 PDF units).
@@ -86,6 +101,11 @@ export function VoterCropTool() {
   const pdfDocRef         = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
   const pageCanvasRef     = useRef<HTMLCanvasElement | null>(null);
   const previewWrapperRef = useRef<HTMLDivElement>(null);
+  // Holds the active crop coordinates — set synchronously on PDF load before any rendering
+  const activeCropRef = useRef<CropSet>({
+    front: FRONT_CROP_WIDE, back: BACK_CROP_WIDE,
+    frontPdf: FRONT_CROP_PDF_WIDE, backPdf: BACK_CROP_PDF_WIDE,
+  });
 
   type CropBoxes = { front: React.CSSProperties; back: React.CSSProperties } | null;
   const [cropBoxes, setCropBoxes] = useState<CropBoxes>(null);
@@ -93,9 +113,10 @@ export function VoterCropTool() {
   const updateOverlay = useCallback(() => {
     if (!previewWrapperRef.current || pageCanvasWidth === 0) return;
     const scale = previewWrapperRef.current.clientWidth / pageCanvasWidth;
+    const c = activeCropRef.current;
     setCropBoxes({
-      front: { left: FRONT_CROP.x * scale, top: FRONT_CROP.y * scale, width: FRONT_CROP.w * scale, height: FRONT_CROP.h * scale },
-      back:  { left: BACK_CROP.x  * scale, top: BACK_CROP.y  * scale, width: BACK_CROP.w  * scale, height: BACK_CROP.h  * scale },
+      front: { left: c.front.x * scale, top: c.front.y * scale, width: c.front.w * scale, height: c.front.h * scale },
+      back:  { left: c.back.x  * scale, top: c.back.y  * scale, width: c.back.w  * scale, height: c.back.h  * scale },
     });
   }, [pageCanvasWidth]);
 
@@ -190,6 +211,11 @@ export function VoterCropTool() {
       const pdf  = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0), password: pdfPassword }).promise;
       pdfDocRef.current = pdf;
       const page = await pdf.getPage(1);
+      // Detect portrait A4 (≤700 PDF units wide) vs wide/landscape format
+      const vp1 = page.getViewport({ scale: 1 });
+      activeCropRef.current = vp1.width <= 700
+        ? { front: FRONT_CROP_PORT, back: BACK_CROP_PORT, frontPdf: FRONT_CROP_PDF_PORT, backPdf: BACK_CROP_PDF_PORT }
+        : { front: FRONT_CROP_WIDE, back: BACK_CROP_WIDE, frontPdf: FRONT_CROP_PDF_WIDE, backPdf: BACK_CROP_PDF_WIDE };
       const canvas = await renderPageToCanvas(page);
       pageCanvasRef.current = canvas;
       setPageCanvasWidth(canvas.width);
@@ -241,9 +267,10 @@ export function VoterCropTool() {
 
   const extractSinglePageCards = async () => {
     const page = await pdfDocRef.current!.getPage(1);
+    const { frontPdf, backPdf } = activeCropRef.current;
     const [front, back] = await Promise.all([
-      renderCropRegion(page, FRONT_CROP_PDF),
-      renderCropRegion(page, BACK_CROP_PDF),
+      renderCropRegion(page, frontPdf),
+      renderCropRegion(page, backPdf),
     ]);
     return [front.toDataURL('image/png'), back.toDataURL('image/png')];
   };
