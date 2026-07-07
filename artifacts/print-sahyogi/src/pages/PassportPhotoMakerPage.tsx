@@ -3,22 +3,24 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   UploadCloud, Download, AlertCircle, CheckCircle2, Plus, X, ImageIcon, Loader2,
 } from 'lucide-react';
+import { jsPDF } from 'jspdf';
 
 // ── Layout (300 DPI A4) ─────────────────────────────────────────────────────
-const A4_W     = 2480;
-const A4_H     = 3508;
-const MARGIN_L = 60;
-const MARGIN_T = 80;
-const MARGIN_B = 80;
-const PHOTO_W  = 413;   // 35 mm @ 300 DPI
-const PHOTO_H  = 531;   // 45 mm @ 300 DPI
+const A4_W     = 2480;          // 210 mm @ 300 DPI
+const A4_H     = 3508;          // 297 mm @ 300 DPI
+const MARGIN_L = 117;           // left & right margin (user spec)
+const MARGIN_T = 90;
+const MARGIN_B = 90;
+const H_GAP    = 7;             // gap between photos in a row (user spec)
+const ROW_GAP  = 24;            // vertical gap between rows
 const PER_ROW  = 5;
-const ROW_GAP  = 20;
-const H_GAP    = Math.round((A4_W - MARGIN_L * 2 - PER_ROW * PHOTO_W) / (PER_ROW - 1));
+// Photo dims derived from margins + gaps so it fills exactly
+const PHOTO_W  = Math.floor((A4_W - 2 * MARGIN_L - (PER_ROW - 1) * H_GAP) / PER_ROW); // 443
+const PHOTO_H  = Math.round(PHOTO_W * 45 / 35);                                         // 570
 
 let _max = 0;
 while ((_max + 1) * PHOTO_H + _max * ROW_GAP <= A4_H - MARGIN_T - MARGIN_B) _max++;
-const MAX_ROWS = _max; // 6
+const MAX_ROWS = _max;
 
 // ── remove.bg proxy ─────────────────────────────────────────────────────────
 async function removeBg(file: File, signal: AbortSignal): Promise<Blob> {
@@ -198,7 +200,17 @@ function buildA4Canvas(canvases: HTMLCanvasElement[]): HTMLCanvasElement {
   return a4;
 }
 
-function downloadCanvas(canvas: HTMLCanvasElement, name: string) {
+/** Export a full A4 canvas as a print-quality PDF (300 DPI JPEG embedded). */
+function downloadA4AsPdf(canvas: HTMLCanvasElement, name: string) {
+  // Encode at highest JPEG quality — keeps file size manageable vs PNG
+  const imgData = canvas.toDataURL('image/jpeg', 1.0);
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: false });
+  pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297);
+  pdf.save(name);
+}
+
+/** Download a single passport photo canvas as a PNG. */
+function downloadPhotoAsPng(canvas: HTMLCanvasElement, name: string) {
   const a = document.createElement('a');
   a.download = name;
   a.href = canvas.toDataURL('image/png');
@@ -282,11 +294,11 @@ export default function PassportPhotoMakerPage() {
   const handleDownloadA4 = () => {
     const canvases = rows.filter(r => r.canvas).map(r => r.canvas!);
     if (!canvases.length) return;
-    downloadCanvas(buildA4Canvas(canvases), `passport-sheet-${canvases.length}rows.png`);
+    downloadA4AsPdf(buildA4Canvas(canvases), `passport-sheet-${canvases.length}rows.pdf`);
   };
 
   const handleDownloadSingle = (row: PhotoRow) => {
-    if (row.canvas) downloadCanvas(row.canvas, `passport-photo-row${rows.indexOf(row) + 1}.png`);
+    if (row.canvas) downloadPhotoAsPng(row.canvas, `passport-photo-row${rows.indexOf(row) + 1}.png`);
   };
 
   const openAddPicker = () => addFileInputRef.current?.click();
