@@ -9,12 +9,11 @@ const isVercel = Boolean(process.env.VERCEL);
 const port = Number(process.env.PORT) || 3000;
 const basePath = process.env.BASE_PATH || '/';
 
-// Vercel resolves outputDirectory relative to the package dir (artifacts/print-sahyogi/),
-// not the monorepo root. Output to `build/` (not gitignored) within this package dir
-// so vercel.json outputDirectory="build" resolves correctly.
+// Output to the monorepo root's `build/` on Vercel so that vercel.json
+// outputDirectory="build" (resolved from repo root) unambiguously finds it.
 // Locally / Replit: keep using `dist` inside the artifact dir.
 const outDir = isVercel
-  ? path.resolve(import.meta.dirname, 'build')
+  ? path.resolve(import.meta.dirname, '../../build')
   : path.resolve(import.meta.dirname, 'dist');
 
 export default defineConfig(async () => {
@@ -54,7 +53,9 @@ export default defineConfig(async () => {
     root: path.resolve(import.meta.dirname),
     build: {
       outDir,
-      emptyOutDir: true,
+      // outDir is outside the Vite root on Vercel; disable auto-empty to avoid
+      // the "outside root" warning — the Vercel build env is always clean anyway.
+      emptyOutDir: isVercel ? false : true,
     },
     server: {
       port,
