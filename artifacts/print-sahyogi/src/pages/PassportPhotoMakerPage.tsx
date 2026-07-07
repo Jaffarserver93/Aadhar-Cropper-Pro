@@ -524,7 +524,7 @@ export default function PassportPhotoMakerPage() {
       </div>
 
       {/* Hidden file input */}
-      <input ref={fileInputRef} type="file" accept="image/*" capture="user" className="hidden" onChange={onFileChange} />
+      <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={onFileChange} />
     </div>
   );
 }
