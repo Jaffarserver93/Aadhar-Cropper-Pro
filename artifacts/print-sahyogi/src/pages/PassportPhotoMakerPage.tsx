@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  UploadCloud, Download, AlertCircle, CheckCircle2, X, ImageIcon, Loader2, Plus,
+  UploadCloud, Download, AlertCircle, CheckCircle2, X, ImageIcon, Loader2, Plus, Minus,
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 
@@ -156,27 +156,31 @@ async function makePassportCanvas(file: File, bgBlob: Blob): Promise<HTMLCanvasE
   }
 }
 
-// ── A4 builder (each row = its own canvas) ────────────────────────────────────
-function buildA4Canvas(canvases: HTMLCanvasElement[]): HTMLCanvasElement {
+// ── A4 builder — each entry repeated by its copies count ─────────────────────
+function buildA4Canvas(entries: { canvas: HTMLCanvasElement; copies: number }[]): HTMLCanvasElement {
   const a4 = document.createElement('canvas');
   a4.width = A4_W; a4.height = A4_H;
   const ctx = a4.getContext('2d')!;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, A4_W, A4_H);
-  canvases.forEach((pc, rowIdx) => {
-    const y = MARGIN_T + rowIdx * (PHOTO_H + ROW_GAP);
-    for (let col = 0; col < PER_ROW; col++) {
-      ctx.drawImage(pc, MARGIN_L + col * (PHOTO_W + H_GAP), y, PHOTO_W, PHOTO_H);
+  let rowIdx = 0;
+  for (const { canvas, copies } of entries) {
+    for (let c = 0; c < copies; c++) {
+      const y = MARGIN_T + rowIdx * (PHOTO_H + ROW_GAP);
+      for (let col = 0; col < PER_ROW; col++) {
+        ctx.drawImage(canvas, MARGIN_L + col * (PHOTO_W + H_GAP), y, PHOTO_W, PHOTO_H);
+      }
+      rowIdx++;
     }
-  });
+  }
   return a4;
 }
 
-function downloadA4AsPdf(canvases: HTMLCanvasElement[]) {
-  const imgData = buildA4Canvas(canvases).toDataURL('image/png');
+function downloadA4AsPdf(entries: { canvas: HTMLCanvasElement; copies: number }[], totalRows: number) {
+  const imgData = buildA4Canvas(entries).toDataURL('image/png');
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: false });
   pdf.addImage(imgData, 'PNG', 0, 0, 210, 297, undefined, 'NONE');
-  pdf.save(`passport-sheet-${canvases.length}rows-${canvases.length * PER_ROW}photos.pdf`);
+  pdf.save(`passport-sheet-${totalRows}rows-${totalRows * PER_ROW}photos.pdf`);
 }
 
 function downloadSingleAsPng(canvas: HTMLCanvasElement, rowIdx: number) {
@@ -200,6 +204,7 @@ interface PhotoRow {
   canvas: HTMLCanvasElement | null;
   dataUrl: string | null;
   error: string | null;
+  copies: number; // how many A4 rows this photo occupies (default 1)
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -209,13 +214,18 @@ export default function PassportPhotoMakerPage() {
   const [isDragging, setIsDragging] = useState(false);
 
   const addFileInputRef = useRef<HTMLInputElement>(null);
+  const retryInputRef   = useRef<HTMLInputElement>(null);
   const abortMap        = useRef<Map<string, AbortController>>(new Map());
+
+  // Total A4 rows used across all photos
+  const totalCopies = rows.reduce((s, r) => s + r.copies, 0);
+  const canAdd      = totalCopies < MAX_ROWS;
 
   // Rebuild A4 preview whenever rows change
   useEffect(() => {
-    const canvases = rows.filter(r => r.status === 'done' && r.canvas).map(r => r.canvas!);
-    if (!canvases.length) { setA4DataUrl(null); return; }
-    setA4DataUrl(buildA4Canvas(canvases).toDataURL('image/png'));
+    const entries = rows.filter(r => r.status === 'done' && r.canvas).map(r => ({ canvas: r.canvas!, copies: r.copies }));
+    if (!entries.length) { setA4DataUrl(null); return; }
+    setA4DataUrl(buildA4Canvas(entries).toDataURL('image/png'));
   }, [rows]);
 
   useEffect(() => () => abortMap.current.forEach(c => c.abort()), []);
@@ -227,10 +237,10 @@ export default function PassportPhotoMakerPage() {
     const ctrl = new AbortController();
     abortMap.current.set(id, ctrl);
 
-    const processing: PhotoRow = { id, status: 'processing', canvas: null, dataUrl: null, error: null };
+    const processing: PhotoRow = { id, status: 'processing', canvas: null, dataUrl: null, error: null, copies: 1 };
     setRows(prev => {
       const idx = prev.findIndex(r => r.id === id);
-      if (idx >= 0) { const next = [...prev]; next[idx] = processing; return next; }
+      if (idx >= 0) { const next = [...prev]; next[idx] = { ...next[idx], ...processing, copies: next[idx].copies }; return next; }
       return [...prev, processing];
     });
 
@@ -239,12 +249,12 @@ export default function PassportPhotoMakerPage() {
       if (ctrl.signal.aborted) return;
       const canvas = await makePassportCanvas(file, bgBlob);
       if (ctrl.signal.aborted) return;
-      const done: PhotoRow = { id, status: 'done', canvas, dataUrl: canvas.toDataURL('image/png'), error: null };
-      setRows(prev => prev.map(r => r.id === id ? done : r));
+      const done: PhotoRow = { id, status: 'done', canvas, dataUrl: canvas.toDataURL('image/png'), error: null, copies: 1 };
+      setRows(prev => prev.map(r => r.id === id ? { ...done, copies: r.copies } : r));
     } catch (err) {
       if ((err as DOMException)?.name === 'AbortError') return;
-      const error: PhotoRow = { id, status: 'error', canvas: null, dataUrl: null, error: friendlyError(err) };
-      setRows(prev => prev.map(r => r.id === id ? error : r));
+      const error: PhotoRow = { id, status: 'error', canvas: null, dataUrl: null, error: friendlyError(err), copies: 1 };
+      setRows(prev => prev.map(r => r.id === id ? { ...error, copies: r.copies } : r));
     } finally {
       abortMap.current.delete(id);
     }
@@ -260,7 +270,14 @@ export default function PassportPhotoMakerPage() {
     retryInputRef.current?.click();
   };
 
-  const retryInputRef = useRef<HTMLInputElement>(null);
+  const setCopies = (id: string, delta: number) => {
+    setRows(prev => prev.map(r => {
+      if (r.id !== id) return r;
+      const others = prev.filter(x => x.id !== id).reduce((s, x) => s + x.copies, 0);
+      const next = Math.min(MAX_ROWS - others, Math.max(1, r.copies + delta));
+      return { ...r, copies: next };
+    }));
+  };
 
   const onAddFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -280,16 +297,15 @@ export default function PassportPhotoMakerPage() {
   const onDrop      = (e: React.DragEvent) => {
     e.preventDefault(); setIsDragging(false);
     const f = e.dataTransfer.files[0];
-    if (f && rows.length < MAX_ROWS) processFile(f);
+    if (f && canAdd) processFile(f);
   };
 
   const handleDownloadA4 = () => {
-    const canvases = rows.filter(r => r.canvas).map(r => r.canvas!);
-    if (canvases.length) downloadA4AsPdf(canvases);
+    const entries = rows.filter(r => r.canvas).map(r => ({ canvas: r.canvas!, copies: r.copies }));
+    if (entries.length) downloadA4AsPdf(entries, totalCopies);
   };
 
   const doneRows = rows.filter(r => r.status === 'done');
-  const canAdd   = rows.length < MAX_ROWS;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-white flex flex-col">
@@ -365,69 +381,115 @@ export default function PassportPhotoMakerPage() {
 
           {/* Row cards */}
           <AnimatePresence initial={false}>
-            {rows.map((row, idx) => (
-              <motion.div key={row.id}
-                initial={{ opacity: 0, y: 16, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -8, scale: 0.97 }}
-                transition={{ duration: 0.2 }}
-                className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center gap-3"
-              >
-                {/* Row number */}
-                <div className="shrink-0 w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-xs font-bold text-slate-300">
-                  {idx + 1}
-                </div>
-
-                {/* Content */}
-                <div className="flex-1 flex items-center gap-2 min-w-0 overflow-hidden">
-                  {row.status === 'processing' && (
-                    <div className="flex items-center gap-3 text-slate-400 text-sm">
-                      <Loader2 className="w-5 h-5 animate-spin text-blue-400 shrink-0" />
-                      <span className="truncate">Removing background &amp; cropping…</span>
+            {rows.map((row, idx) => {
+              const othersTotal = rows.filter(r => r.id !== row.id).reduce((s, r) => s + r.copies, 0);
+              const canInc = othersTotal + row.copies < MAX_ROWS;
+              const canDec = row.copies > 1;
+              return (
+                <motion.div key={row.id}
+                  initial={{ opacity: 0, y: 16, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -8, scale: 0.97 }}
+                  transition={{ duration: 0.2 }}
+                  className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col gap-3"
+                >
+                  {/* Top row: number + status + delete */}
+                  <div className="flex items-center gap-3">
+                    <div className="shrink-0 w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-xs font-bold text-slate-300">
+                      {idx + 1}
                     </div>
-                  )}
 
-                  {row.status === 'done' && row.dataUrl && (
-                    <>
-                      {/* 5 thumbnail copies */}
-                      <div className="flex gap-1.5 overflow-hidden">
-                        {Array.from({ length: PER_ROW }, (_, i) => (
-                          <div key={i}
-                            className="shrink-0 rounded overflow-hidden border border-black/40"
-                            style={{ width: 44, height: 57, background: '#fff' }}>
-                            <img src={row.dataUrl!} alt="" className="w-full h-full object-cover block" style={{ background: '#fff' }} />
+                    <div className="flex-1 flex items-center gap-2 min-w-0 overflow-hidden">
+                      {row.status === 'processing' && (
+                        <div className="flex items-center gap-3 text-slate-400 text-sm">
+                          <Loader2 className="w-5 h-5 animate-spin text-blue-400 shrink-0" />
+                          <span className="truncate">Removing background &amp; cropping…</span>
+                        </div>
+                      )}
+
+                      {row.status === 'done' && row.dataUrl && (
+                        <>
+                          {/* 5 thumbnail copies */}
+                          <div className="flex gap-1 overflow-hidden">
+                            {Array.from({ length: PER_ROW }, (_, i) => (
+                              <div key={i}
+                                className="shrink-0 rounded overflow-hidden border border-black/40"
+                                style={{ width: 38, height: 49, background: '#fff' }}>
+                                <img src={row.dataUrl!} alt="" className="w-full h-full object-cover block" style={{ background: '#fff' }} />
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
-                      <div className="ml-1 flex items-center gap-2 shrink-0">
-                        <CheckCircle2 className="w-4 h-4 text-green-400" />
-                        <button onClick={() => downloadSingleAsPng(row.canvas!, idx)}
-                          className="text-xs text-slate-400 hover:text-white underline underline-offset-2 transition-colors whitespace-nowrap">
-                          Save PNG
-                        </button>
-                      </div>
-                    </>
-                  )}
+                          <div className="ml-1 shrink-0 flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
+                            <button onClick={() => downloadSingleAsPng(row.canvas!, idx)}
+                              className="text-xs text-slate-400 hover:text-white underline underline-offset-2 transition-colors whitespace-nowrap">
+                              PNG
+                            </button>
+                          </div>
+                        </>
+                      )}
 
-                  {row.status === 'error' && (
-                    <div className="flex items-center gap-2 text-sm text-red-300 min-w-0">
-                      <AlertCircle className="w-4 h-4 shrink-0" />
-                      <span className="truncate">{row.error}</span>
-                      <button onClick={() => retryRow(row.id)}
-                        className="shrink-0 text-xs underline underline-offset-2 text-slate-400 hover:text-white">
-                        Retry
+                      {row.status === 'error' && (
+                        <div className="flex items-center gap-2 text-sm text-red-300 min-w-0">
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          <span className="truncate">{row.error}</span>
+                          <button onClick={() => retryRow(row.id)}
+                            className="shrink-0 text-xs underline underline-offset-2 text-slate-400 hover:text-white">
+                            Retry
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Delete */}
+                    <button onClick={() => removeRow(row.id)}
+                      className="shrink-0 w-7 h-7 rounded-lg bg-white/10 hover:bg-red-500/20 flex items-center justify-center text-slate-400 hover:text-red-300 transition-colors">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Copies counter — only shown when photo is done */}
+                  {row.status === 'done' && (
+                    <div className="flex items-center gap-3 pl-11">
+                      {/* − */}
+                      <button
+                        onClick={() => setCopies(row.id, -1)}
+                        disabled={!canDec}
+                        className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/15 active:scale-95 flex items-center justify-center text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                        aria-label="Remove copy"
+                      >
+                        <Minus className="w-4 h-4" />
                       </button>
+
+                      {/* Counter */}
+                      <div className="flex-1 max-w-[140px] bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-center select-none">
+                        <motion.p key={row.copies} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                          className="text-lg font-bold text-white leading-none">
+                          {row.copies}
+                        </motion.p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          {row.copies === 1 ? 'row' : 'rows'} · {row.copies * PER_ROW} photos
+                        </p>
+                      </div>
+
+                      {/* + */}
+                      <button
+                        onClick={() => setCopies(row.id, +1)}
+                        disabled={!canInc}
+                        className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 active:scale-95 flex items-center justify-center text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-md shadow-blue-900/30"
+                        aria-label="Add copy"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
+
+                      <p className="text-[10px] text-slate-600 ml-1">
+                        {totalCopies}/{MAX_ROWS} rows used
+                      </p>
                     </div>
                   )}
-                </div>
-
-                {/* Delete */}
-                <button onClick={() => removeRow(row.id)}
-                  className="shrink-0 w-7 h-7 rounded-lg bg-white/10 hover:bg-red-500/20 flex items-center justify-center text-slate-400 hover:text-red-300 transition-colors">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </motion.div>
-            ))}
+                </motion.div>
+              );
+            })}
           </AnimatePresence>
 
           {/* Add row button */}
