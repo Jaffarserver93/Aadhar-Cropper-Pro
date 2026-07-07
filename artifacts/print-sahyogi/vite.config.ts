@@ -9,11 +9,11 @@ const isVercel = Boolean(process.env.VERCEL);
 const port = Number(process.env.PORT) || 3000;
 const basePath = process.env.BASE_PATH || '/';
 
-// Output to the monorepo root's `build/` on Vercel so that vercel.json
-// outputDirectory="build" (resolved from repo root) unambiguously finds it.
-// Locally / Replit: keep using `dist` inside the artifact dir.
+// Output to the package-local `build/` dir. The Vercel build script
+// (scripts/build-vercel.mjs) copies this into .vercel/output/static/.
+// Locally / Replit: keep using `dist`.
 const outDir = isVercel
-  ? path.resolve(import.meta.dirname, '../../build')
+  ? path.resolve(import.meta.dirname, 'build')
   : path.resolve(import.meta.dirname, 'dist');
 
 export default defineConfig(async () => {
@@ -53,9 +53,7 @@ export default defineConfig(async () => {
     root: path.resolve(import.meta.dirname),
     build: {
       outDir,
-      // outDir is outside the Vite root on Vercel; disable auto-empty to avoid
-      // the "outside root" warning — the Vercel build env is always clean anyway.
-      emptyOutDir: isVercel ? false : true,
+      emptyOutDir: true,
     },
     server: {
       port,

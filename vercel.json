@@ -1,9 +1,5 @@
 {
-  "buildCommand": "pnpm --filter @workspace/print-sahyogi run build",
-  "outputDirectory": "build",
+  "buildCommand": "node scripts/build-vercel.mjs",
   "installCommand": "pnpm install --frozen-lockfile",
-  "framework": null,
-  "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
-  ]
+  "framework": null
 }
