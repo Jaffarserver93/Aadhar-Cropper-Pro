@@ -1,19 +1,24 @@
-# [Project name]
+# Print Sahyogi
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A web tool that lets users upload, unlock (password-protected), auto-crop, and print Aadhaar card PDFs in a print-ready A4 layout — entirely client-side with zero data stored. Also includes a passport photo maker with background removal and face-aware cropping.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/print-sahyogi run dev` — run the frontend (managed workflow: `artifacts/print-sahyogi: web`)
+- `pnpm --filter @workspace/api-server run dev` — run the API server (managed workflow: `artifacts/api-server: API Server`)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
+- Required env: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` — Supabase auth
+- Required env: `REMOVEBG_API_KEY` — remove.bg background removal (via `/api/removebg` proxy)
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
+- Frontend: React + Vite, Tailwind CSS, Framer Motion, shadcn/ui, wouter (routing)
+- Auth: Supabase
 - API: Express 5
 - DB: PostgreSQL + Drizzle ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
@@ -22,15 +27,25 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/print-sahyogi/` — React + Vite frontend, preview path `/`
+- `artifacts/api-server/` — Express API server, preview path `/api`
+- `lib/db/` — Drizzle schema + migrations
+- `lib/api-spec/openapi.yaml` — OpenAPI spec (source of truth for API contracts)
+- `lib/api-client-react/` — generated React Query hooks from OpenAPI spec
+
+## Key pages
+
+- `/` — Home
+- `/demo-passport-size-maker` — Passport photo maker (upload → remove bg → crop → +/- rows → download A4 PDF)
+- `/demopdf` — Aadhaar PDF tool (demo)
+- `/aadhaar/crop` — Protected Aadhaar crop tool
+- `/voter-id-card/crop` — Protected Voter ID crop tool
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
-
-## Product
-
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Passport photo maker is entirely client-side (no server storage) — remove.bg call proxied through `/api/removebg` to keep API key server-side
+- Supabase used for auth only; DB schema lives in Drizzle (PostgreSQL)
+- Vercel `outputDirectory` resolves relative to package CWD → output to `build/` (not gitignored) within `artifacts/print-sahyogi/`
 
 ## User preferences
 
@@ -38,7 +53,8 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- After any code/package/toolchain changes, restart the relevant managed workflow (`artifacts/print-sahyogi: web` for frontend)
+- `pnpm install` must be run before starting workflows in a fresh environment
 
 ## Pointers
 
