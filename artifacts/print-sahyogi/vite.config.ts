@@ -5,14 +5,15 @@ import { defineConfig } from 'vite';
 
 const isReplit = Boolean(process.env.REPL_ID);
 const isVercel = Boolean(process.env.VERCEL);
+const isBuildCommand = process.argv.includes('build');
 
 const port = Number(process.env.PORT) || 3000;
 const basePath = process.env.BASE_PATH || '/';
 
-// Output to the `build/` directory in the monorepo root.
-// On Vercel: /vercel/path0/artifacts/print-sahyogi + ../../build = /vercel/path0/build
-// Locally / Replit: keep using `dist` inside the artifact dir.
-const outDir = isVercel
+// Output to the `build/` directory in the monorepo root when building for production.
+// During build (npm run build, pnpm build, or vite build): output to ../../build
+// During dev (npm run dev, etc): keep using `dist` inside the artifact dir.
+const outDir = (isVercel || isBuildCommand) && !isReplit
   ? path.resolve(import.meta.dirname, '..', '..', 'build')
   : path.resolve(import.meta.dirname, 'dist');
 
