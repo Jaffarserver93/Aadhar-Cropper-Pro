@@ -510,19 +510,11 @@ export default function PassportPhotoMakerPage() {
             </motion.div>
           )}
 
-          {/* Mobile download */}
-          {doneRows.length > 0 && (
-            <button onClick={handleDownloadA4}
-              className="lg:hidden flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-semibold bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 text-white shadow-lg shadow-blue-900/30 transition-all">
-              <Download className="w-4 h-4" />
-              Download A4 PDF · {doneRows.length} row{doneRows.length !== 1 ? 's' : ''} · {doneRows.length * PER_ROW} photos
-            </button>
-          )}
         </div>
 
-        {/* ── Right: A4 Preview (desktop) ── */}
+        {/* ── A4 Preview — below on mobile, sidebar on desktop ── */}
         {(doneRows.length > 0 || rows.some(r => r.status === 'processing')) && (
-          <div className="hidden lg:flex w-72 xl:w-80 shrink-0 border-l border-white/10 flex-col p-5 gap-4">
+          <div className="flex flex-col shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 p-5 gap-4 w-full lg:w-72 xl:w-80">
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium text-slate-300">A4 Preview</p>
               <p className="text-[11px] text-slate-500">
@@ -530,11 +522,14 @@ export default function PassportPhotoMakerPage() {
               </p>
             </div>
 
-            {/* A4 ratio 210:297 */}
-            <div className="rounded-lg shadow-2xl overflow-hidden" style={{ aspectRatio: '210/297', background: '#fff' }}>
+            {/* A4 ratio 210:297 — constrained height on mobile so it doesn't dominate */}
+            <div
+              className="rounded-lg shadow-2xl overflow-hidden mx-auto w-full"
+              style={{ aspectRatio: '210/297', maxWidth: 260, background: '#fff' }}
+            >
               {a4DataUrl
                 ? <img src={a4DataUrl} alt="A4 preview" className="w-full h-full object-contain block" style={{ background: '#fff' }} />
-                : <div className="w-full h-full flex items-center justify-center text-slate-300 text-xs" style={{ background: '#fff' }}>Building…</div>
+                : <div className="w-full h-full flex items-center justify-center text-slate-400 text-xs" style={{ background: '#fff' }}>Building…</div>
               }
             </div>
 
@@ -545,7 +540,7 @@ export default function PassportPhotoMakerPage() {
             <button onClick={handleDownloadA4} disabled={doneRows.length === 0}
               className="flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 text-white shadow-lg shadow-blue-900/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
               <Download className="w-4 h-4" />
-              Download A4 PDF
+              Download A4 PDF · {totalCopies} row{totalCopies !== 1 ? 's' : ''} · {totalCopies * PER_ROW} photos
             </button>
 
             <p className="text-[10px] text-slate-600 text-center">Print at 300 DPI · A4 · No scaling</p>
