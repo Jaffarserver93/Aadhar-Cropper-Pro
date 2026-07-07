@@ -11,7 +11,7 @@ const A4_H     = 3508;
 const MARGIN_L = 117;
 const MARGIN_T = 90;
 const MARGIN_B = 90;
-const H_GAP    = 7;
+const H_GAP    = 10;
 const ROW_GAP  = 24;
 const PER_ROW  = 5;
 const PHOTO_W  = Math.floor((A4_W - 2 * MARGIN_L - (PER_ROW - 1) * H_GAP) / PER_ROW);
@@ -134,8 +134,8 @@ async function makePassportCanvas(file: File, bgBlob: Blob): Promise<HTMLCanvasE
     cropW = Math.max(1, Math.min(srcW - cropX, cropW));
     cropH = Math.max(1, Math.min(srcH - cropY, cropH));
 
-    // 1 mm border at 300 DPI = 300/25.4 ≈ 12 px
-    const BORDER = Math.round(300 / 25.4); // 12 px
+    // 0.5 mm border at 300 DPI = 300/25.4*0.5 ≈ 6 px
+    const BORDER = Math.round(300 / 25.4 * 0.5); // 6 px
 
     const canvas = document.createElement('canvas');
     canvas.width = PHOTO_W; canvas.height = PHOTO_H;
@@ -145,18 +145,18 @@ async function makePassportCanvas(file: File, bgBlob: Blob): Promise<HTMLCanvasE
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, PHOTO_W, PHOTO_H);
 
-    // Draw photo content inside the 1 mm border (33×43 mm inner area)
+    // Draw photo content inside the 0.5 mm border
     ctx.drawImage(
       bgBmp,
       cropX, cropY, cropW, cropH,
       BORDER, BORDER, PHOTO_W - 2 * BORDER, PHOTO_H - 2 * BORDER,
     );
 
-    // Draw 1 mm solid black border on top (cutting guide)
+    // Draw 0.5 mm solid black border on top (cutting guide)
     ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, PHOTO_W, BORDER);                        // top
-    ctx.fillRect(0, PHOTO_H - BORDER, PHOTO_W, BORDER);         // bottom
-    ctx.fillRect(0, BORDER, BORDER, PHOTO_H - 2 * BORDER);      // left
+    ctx.fillRect(0, 0, PHOTO_W, BORDER);                               // top
+    ctx.fillRect(0, PHOTO_H - BORDER, PHOTO_W, BORDER);               // bottom
+    ctx.fillRect(0, BORDER, BORDER, PHOTO_H - 2 * BORDER);            // left
     ctx.fillRect(PHOTO_W - BORDER, BORDER, BORDER, PHOTO_H - 2 * BORDER); // right
 
     return canvas;
@@ -182,9 +182,10 @@ function buildA4Canvas(canvas: HTMLCanvasElement, rowCount: number): HTMLCanvasE
 }
 
 function downloadA4AsPdf(canvas: HTMLCanvasElement, rowCount: number) {
-  const imgData = canvas.toDataURL('image/jpeg', 1.0);
+  // PNG = lossless, no re-compression — highest quality, zoom won't break pixels
+  const imgData = canvas.toDataURL('image/png');
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: false });
-  pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297);
+  pdf.addImage(imgData, 'PNG', 0, 0, 210, 297, undefined, 'NONE');
   pdf.save(`passport-sheet-${rowCount}rows-${rowCount * PER_ROW}photos.pdf`);
 }
 
@@ -216,7 +217,8 @@ export default function PassportPhotoMakerPage() {
   // Rebuild A4 whenever photo or rowCount changes
   useEffect(() => {
     if (!photo?.canvas) { setA4DataUrl(null); return; }
-    setA4DataUrl(buildA4Canvas(photo.canvas, rowCount).toDataURL('image/jpeg', 0.92));
+    // Use PNG so white background renders accurately in preview (JPEG can muddy whites)
+    setA4DataUrl(buildA4Canvas(photo.canvas, rowCount).toDataURL('image/png'));
   }, [photo, rowCount]);
 
   useEffect(() => () => { abortRef.current?.abort(); }, []);
@@ -419,9 +421,9 @@ export default function PassportPhotoMakerPage() {
                       >
                         {Array.from({ length: PER_ROW }, (_, colIdx) => (
                           <div key={colIdx}
-                            className="flex-1 rounded overflow-hidden border border-black/30"
-                            style={{ aspectRatio: '35/45' }}>
-                            <img src={photo.dataUrl!} alt="" className="w-full h-full object-cover" />
+                            className="flex-1 rounded overflow-hidden border border-black/40"
+                            style={{ aspectRatio: '35/45', background: '#fff' }}>
+                            <img src={photo.dataUrl!} alt="" className="w-full h-full object-cover" style={{ display: 'block', background: '#fff' }} />
                           </div>
                         ))}
                       </motion.div>
