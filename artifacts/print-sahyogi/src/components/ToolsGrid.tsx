@@ -94,17 +94,17 @@ const tools: Tool[] = [
   {
     id: 'passport',
     name: 'Passport Size Photo',
-    description: 'Arrange multiple passport-size photos on an A4 sheet, ready to cut and submit.',
-    badge: 'Coming Soon',
-    route: null,
-    available: false,
+    description: 'Remove background, crop to exact 35×45 mm, and print up to 30 photos on a single A4 sheet.',
+    badge: 'Available Now',
+    route: '/passport-size-maker',
+    available: true,
     icon: (
       <svg viewBox="0 0 48 48" fill="none" className="w-10 h-10" xmlns="http://www.w3.org/2000/svg">
-        <rect width="48" height="48" rx="10" fill="#64748b" />
-        <rect x="10" y="8" width="28" height="32" rx="3" fill="white" opacity="0.1" />
-        <rect x="10" y="8" width="28" height="32" rx="3" stroke="white" strokeWidth="1.5" opacity="0.5" />
-        <circle cx="24" cy="22" r="5" fill="none" stroke="white" strokeWidth="1.5" opacity="0.4" />
-        <path d="M14 36c0-5.5 4.5-8 10-8s10 2.5 10 8" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.3" />
+        <rect width="48" height="48" rx="10" fill="hsl(222 72% 18%)" />
+        <rect x="10" y="8" width="28" height="32" rx="3" fill="white" opacity="0.15" />
+        <rect x="10" y="8" width="28" height="32" rx="3" stroke="white" strokeWidth="1.5" />
+        <circle cx="24" cy="21" r="5" fill="none" stroke="#f59e0b" strokeWidth="1.5" />
+        <path d="M14 36c0-5.5 4.5-8 10-8s10 2.5 10 8" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.8" />
       </svg>
     ),
   },
