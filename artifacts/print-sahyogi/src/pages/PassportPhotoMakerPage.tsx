@@ -134,15 +134,31 @@ async function makePassportCanvas(file: File, bgBlob: Blob): Promise<HTMLCanvasE
     cropW = Math.max(1, Math.min(srcW - cropX, cropW));
     cropH = Math.max(1, Math.min(srcH - cropY, cropH));
 
+    // 1 mm border at 300 DPI = 300/25.4 ≈ 12 px
+    const BORDER = Math.round(300 / 25.4); // 12 px
+
     const canvas = document.createElement('canvas');
     canvas.width = PHOTO_W; canvas.height = PHOTO_H;
     const ctx = canvas.getContext('2d')!;
+
+    // Fill white background (whole 35×45 mm)
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, PHOTO_W, PHOTO_H);
-    ctx.drawImage(bgBmp, cropX, cropY, cropW, cropH, 0, 0, PHOTO_W, PHOTO_H);
-    ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(0.5, 0.5, PHOTO_W - 1, PHOTO_H - 1);
+
+    // Draw photo content inside the 1 mm border (33×43 mm inner area)
+    ctx.drawImage(
+      bgBmp,
+      cropX, cropY, cropW, cropH,
+      BORDER, BORDER, PHOTO_W - 2 * BORDER, PHOTO_H - 2 * BORDER,
+    );
+
+    // Draw 1 mm solid black border on top (cutting guide)
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, PHOTO_W, BORDER);                        // top
+    ctx.fillRect(0, PHOTO_H - BORDER, PHOTO_W, BORDER);         // bottom
+    ctx.fillRect(0, BORDER, BORDER, PHOTO_H - 2 * BORDER);      // left
+    ctx.fillRect(PHOTO_W - BORDER, BORDER, BORDER, PHOTO_H - 2 * BORDER); // right
+
     return canvas;
   } finally {
     bgBmp.close();
@@ -508,7 +524,7 @@ export default function PassportPhotoMakerPage() {
       </div>
 
       {/* Hidden file input */}
-      <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFileChange} />
+      <input ref={fileInputRef} type="file" accept="image/*" capture="user" className="hidden" onChange={onFileChange} />
     </div>
   );
 }
