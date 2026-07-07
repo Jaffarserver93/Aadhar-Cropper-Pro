@@ -68,6 +68,15 @@ async function makePassportCanvas(sourceBlob: Blob): Promise<HTMLCanvasElement> 
       sy = Math.round((bmp.height - sh) / 2);
     }
     ctx.drawImage(bmp, sx, sy, sw, sh, 0, 0, PHOTO_W, PHOTO_H);
+
+    // 1 mm black border (cut guide) — standard for Indian passport photos
+    // 1 mm @ 300 DPI = 11.81 px ≈ 12 px. strokeRect is centred on the path,
+    // so offset by half lineWidth (6 px) to keep the stroke fully inside the canvas.
+    const BORDER_PX = 12; // 1 mm at 300 DPI
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth   = BORDER_PX;
+    ctx.strokeRect(BORDER_PX / 2, BORDER_PX / 2, PHOTO_W - BORDER_PX, PHOTO_H - BORDER_PX);
+
     return canvas;
   } finally {
     bmp.close(); // release GPU resources
