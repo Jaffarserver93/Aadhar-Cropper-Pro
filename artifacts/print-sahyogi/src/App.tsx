@@ -40,24 +40,34 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
   return <Component />;
 }
 
+// Scroll to top on every route change
+function ScrollToTop() {
+  const [location] = useLocation();
+  useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }); }, [location]);
+  return null;
+}
+
 function Router() {
   return (
-    <Switch>
-      <Route path="/" component={Home} />
-      <Route path="/login" component={Login} />
-      <Route path="/register" component={Register} />
-      <Route path="/code-generator" component={CodeGenerator} />
-      <Route path="/demopdf" component={DemoPDF} />
-      <Route path="/demo-passport-size-maker" component={PassportPhotoMakerPage} />
-      <Route path="/passport-size-maker" component={PassportSizeMakerPage} />
-      <Route path="/aadhaar/crop">
-        {() => <ProtectedRoute component={AadhaarCropPage} />}
-      </Route>
-      <Route path="/voter-id-card/crop">
-        {() => <ProtectedRoute component={VoterIdCropPage} />}
-      </Route>
-      <Route component={NotFound} />
-    </Switch>
+    <>
+      <ScrollToTop />
+      <Switch>
+        <Route path="/" component={Home} />
+        <Route path="/login" component={Login} />
+        <Route path="/register" component={Register} />
+        <Route path="/code-generator" component={CodeGenerator} />
+        <Route path="/demopdf" component={DemoPDF} />
+        <Route path="/demo-passport-size-maker" component={PassportPhotoMakerPage} />
+        <Route path="/passport-size-maker" component={PassportSizeMakerPage} />
+        <Route path="/aadhaar/crop">
+          {() => <ProtectedRoute component={AadhaarCropPage} />}
+        </Route>
+        <Route path="/voter-id-card/crop">
+          {() => <ProtectedRoute component={VoterIdCropPage} />}
+        </Route>
+        <Route component={NotFound} />
+      </Switch>
+    </>
   );
 }
 
