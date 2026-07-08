@@ -39,68 +39,90 @@ async function removeBg(file: File, signal: AbortSignal): Promise<Blob> {
   return res.blob();
 }
 
-// ── Face detection ────────────────────────────────────────────────────────────
-interface FaceBox { x: number; y: number; width: number; height: number }
-
-async function detectFace(file: File): Promise<{ box: FaceBox; origW: number; origH: number } | null> {
-  if (!('FaceDetector' in window)) return null;
-  try {
-    const bmp = await createImageBitmap(file);
-    const origW = bmp.width, origH = bmp.height;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const det = new (window as any).FaceDetector({ fastMode: false, maxDetectedFaces: 3 });
-    const faces: any[] = await det.detect(bmp);
-    bmp.close();
-    if (!faces.length) return null;
-    const best = faces.reduce((a: any, b: any) =>
-      b.boundingBox.width * b.boundingBox.height > a.boundingBox.width * a.boundingBox.height ? b : a);
-    return { box: best.boundingBox as FaceBox, origW, origH };
-  } catch { return null; }
-}
-
-async function scanBbox(bmp: ImageBitmap): Promise<{ top: number; bottom: number; left: number; right: number } | null> {
-  const S = 0.15;
-  const sw = Math.max(1, Math.round(bmp.width * S)), sh = Math.max(1, Math.round(bmp.height * S));
-  const c = document.createElement('canvas'); c.width = sw; c.height = sh;
-  const ctx = c.getContext('2d')!; ctx.drawImage(bmp, 0, 0, sw, sh);
-  const { data } = ctx.getImageData(0, 0, sw, sh);
-  let top = sh, bottom = -1, left = sw, right = -1;
-  for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++)
-    if (data[(y * sw + x) * 4 + 3] > 20) {
-      if (y < top) top = y; if (y > bottom) bottom = y;
-      if (x < left) left = x; if (x > right) right = x;
+// ── Smart alpha-channel head detection ────────────────────────────────────────
+// Scans the top 18% of the person's bounding box to measure head width,
+// avoiding shoulder-width inflation. Works for all source photo types
+// (headshots, half-body, full standing).
+function analyzePersonAlpha(
+  srcW: number, srcH: number,
+  pixels: Uint8ClampedArray,
+  sampledW: number, sampledH: number,
+): { headTop: number; centerX: number; headHeight: number } | null {
+  let minY = sampledH, maxY = 0, minX = sampledW, maxX = 0;
+  for (let y = 0; y < sampledH; y++) {
+    for (let x = 0; x < sampledW; x++) {
+      if (pixels[(y * sampledW + x) * 4 + 3] > 30) {
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+      }
     }
-  if (bottom < 0) return null;
-  return { top: Math.round(top / S), bottom: Math.round(bottom / S), left: Math.round(left / S), right: Math.round(right / S) };
+  }
+  if (minY >= maxY || minX >= maxX) return null;
+
+  // Scan top 18% of person height — captures skull, avoids shoulder width
+  const headScanBottom = Math.round(minY + (maxY - minY) * 0.18);
+  let headMinX = sampledW, headMaxX = 0;
+  for (let y = minY; y <= headScanBottom; y++) {
+    for (let x = 0; x < sampledW; x++) {
+      if (pixels[(y * sampledW + x) * 4 + 3] > 30) {
+        if (x < headMinX) headMinX = x;
+        if (x > headMaxX) headMaxX = x;
+      }
+    }
+  }
+  if (headMinX >= headMaxX) { headMinX = minX; headMaxX = maxX; }
+
+  const sx = srcW / sampledW, sy = srcH / sampledH;
+  const headTop      = minY * sy;
+  const headWidthSrc = (headMaxX - headMinX) * sx;
+  const centerX      = ((headMinX + headMaxX) / 2) * sx;
+  const headHeight   = headWidthSrc * 1.25; // face aspect ratio h:w ≈ 1.25
+
+  return { headTop, centerX, headHeight };
 }
 
-async function makePassportCanvas(file: File, bgBlob: Blob): Promise<HTMLCanvasElement> {
-  const face = await detectFace(file);
+async function makePassportCanvas(_file: File, bgBlob: Blob): Promise<HTMLCanvasElement> {
   const bgBmp = await createImageBitmap(bgBlob);
   const srcW = bgBmp.width, srcH = bgBmp.height;
   try {
-    let cropX = 0, cropY = 0, cropW = srcW, cropH = srcH;
-    if (face) {
-      const { box, origW, origH } = face;
-      const sx = srcW / origW, sy = srcH / origH;
-      const fX = box.x * sx, fY = box.y * sy, fW = box.width * sx, fH = box.height * sy;
-      const headH = fH * 1.35, faceCX = fX + fW / 2, eyeY = fY + fH * 0.45;
-      const scale = (PHOTO_H * 0.75) / headH;
-      cropW = PHOTO_W / scale; cropH = PHOTO_H / scale;
-      cropY = eyeY - (PHOTO_H * 0.35) / scale; cropX = faceCX - cropW / 2;
+    // Scan at reduced resolution for speed
+    const SCAN_MAX = 500;
+    const scaleF   = Math.min(1, SCAN_MAX / Math.max(srcW, srcH));
+    const sampledW = Math.round(srcW * scaleF);
+    const sampledH = Math.round(srcH * scaleF);
+    const scanCanvas = document.createElement('canvas');
+    scanCanvas.width = sampledW; scanCanvas.height = sampledH;
+    const scanCtx = scanCanvas.getContext('2d')!;
+    scanCtx.drawImage(bgBmp, 0, 0, sampledW, sampledH);
+    const pixels = scanCtx.getImageData(0, 0, sampledW, sampledH).data;
+
+    const info = analyzePersonAlpha(srcW, srcH, pixels, sampledW, sampledH);
+
+    // Layout: 7% space above head | 55% head | 38% neck+shoulders
+    const HEAD_SPACE = 0.07;
+    const FACE_FILL  = 0.55;
+
+    let cropX: number, cropY: number, cropW: number, cropH: number;
+    if (info) {
+      cropH = info.headHeight / FACE_FILL;
+      cropW = cropH * (PHOTO_W / PHOTO_H);
+      cropY = info.headTop - HEAD_SPACE * cropH;
+      cropX = info.centerX - cropW / 2;
     } else {
-      const bbox = await scanBbox(bgBmp);
-      if (bbox) {
-        const pW = Math.max(1, bbox.right - bbox.left), pH = Math.max(1, bbox.bottom - bbox.top);
-        const cx = bbox.left + pW / 2, ar = pH / pW;
-        const headFrac = ar > 3.0 ? 0.15 : ar > 1.8 ? 0.25 : ar > 1.0 ? 0.38 : 0.65;
-        const headH = Math.max(40, pH * headFrac), scale = (PHOTO_H * 0.75) / headH;
-        cropW = Math.max(1, PHOTO_W / scale); cropH = Math.max(1, PHOTO_H / scale);
-        cropY = (bbox.top + headH * 0.5) - (PHOTO_H * 0.35) / scale; cropX = cx - cropW / 2;
-      }
+      // Fallback: center cover-fit
+      const targetAr = PHOTO_W / PHOTO_H;
+      const srcAr    = srcW / srcH;
+      cropX = 0; cropY = 0; cropW = srcW; cropH = srcH;
+      if (srcAr > targetAr) { cropW = srcH * targetAr; cropX = (srcW - cropW) / 2; }
+      else                  { cropH = srcW / targetAr; cropY = (srcH - cropH) / 2; }
     }
-    cropX = Math.max(0, Math.min(srcW - 1, cropX)); cropY = Math.max(0, Math.min(srcH - 1, cropY));
-    cropW = Math.max(1, Math.min(srcW - cropX, cropW)); cropH = Math.max(1, Math.min(srcH - cropY, cropH));
+
+    cropX = Math.max(0, Math.min(srcW - cropW, cropX));
+    cropY = Math.max(0, Math.min(srcH - cropH, cropY));
+    cropW = Math.min(cropW, srcW - cropX);
+    cropH = Math.min(cropH, srcH - cropY);
 
     const canvas = document.createElement('canvas');
     canvas.width = PHOTO_W; canvas.height = PHOTO_H;
