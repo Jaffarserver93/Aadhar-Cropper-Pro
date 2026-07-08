@@ -7,6 +7,7 @@ import { jsPDF } from 'jspdf';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
 import { useLocation } from 'wouter';
+import { getSession, upsertSession } from '@/lib/passportHistory';
 
 // ── Layout — exact 35×45 mm at 300 DPI ──────────────────────────────────────
 const A4_W     = 2480;
@@ -173,6 +174,21 @@ function friendlyError(err: unknown): string {
   return (err as Error)?.message || 'Something went wrong.';
 }
 
+function canvasFromDataUrl(dataUrl: string): Promise<HTMLCanvasElement> {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = PHOTO_W; c.height = PHOTO_H;
+      const ctx = c.getContext('2d')!;
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, PHOTO_W, PHOTO_H);
+      ctx.drawImage(img, 0, 0, PHOTO_W, PHOTO_H);
+      resolve(c);
+    };
+    img.src = dataUrl;
+  });
+}
+
 interface PhotoRow {
   id: string;
   status: 'processing' | 'done' | 'error';
@@ -189,21 +205,61 @@ export default function PassportSizeMakerPage() {
   const [a4DataUrl,   setA4DataUrl]   = useState<string | null>(null);
   const [isDragging,  setIsDragging]  = useState(false);
   const [useWhiteBg,  setUseWhiteBg]  = useState(true);
-  const [, navigate] = useLocation();
+  const [location, navigate] = useLocation();
 
   const addFileRef   = useRef<HTMLInputElement>(null);
   const retryFileRef = useRef<HTMLInputElement>(null);
   const abortMap     = useRef<Map<string, AbortController>>(new Map());
+  const restoredRef  = useRef(false);
+
+  // Extract session ID from URL: /passport-size-maker/{id}
+  const sessionId = (() => {
+    const m = location.match(/\/passport-size-maker\/([^/]+)/);
+    return m?.[1] ?? null;
+  })();
 
   const totalCopies = rows.reduce((s, r) => s + r.copies, 0);
   const canAdd      = totalCopies < MAX_ROWS;
   const doneRows    = rows.filter(r => r.status === 'done');
 
+  // Rebuild A4 preview whenever rows change
   useEffect(() => {
     const entries = rows.filter(r => r.status === 'done' && r.canvas).map(r => ({ canvas: r.canvas!, copies: r.copies, brightness: r.brightness }));
     if (!entries.length) { setA4DataUrl(null); return; }
     setA4DataUrl(buildA4Canvas(entries).toDataURL('image/png'));
   }, [rows]);
+
+  // If no session ID in URL, redirect to a new UUID session
+  useEffect(() => {
+    if (!sessionId) {
+      navigate(`/passport-size-maker/${crypto.randomUUID()}`, { replace: true });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Restore existing session from localStorage on first mount
+  useEffect(() => {
+    if (!sessionId || restoredRef.current) return;
+    restoredRef.current = true;
+    const session = getSession(sessionId);
+    if (!session?.photos.length) return;
+    Promise.all(
+      session.photos.map(async p => {
+        const canvas = await canvasFromDataUrl(p.dataUrl);
+        return { id: crypto.randomUUID(), status: 'done' as const, canvas, dataUrl: p.dataUrl, error: null, copies: p.copies, brightness: p.brightness };
+      })
+    ).then(restored => setRows(restored));
+  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-save to localStorage whenever done rows change
+  useEffect(() => {
+    if (!sessionId || doneRows.length === 0) return;
+    const existing = getSession(sessionId);
+    upsertSession({
+      id: sessionId,
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+      photos: doneRows.map(r => ({ dataUrl: r.dataUrl!, brightness: r.brightness, copies: r.copies })),
+    });
+  }, [doneRows, sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => abortMap.current.forEach(c => c.abort()), []);
 

@@ -6,6 +6,7 @@ import { ToolsGrid } from '@/components/ToolsGrid';
 import { HowItWorks } from '@/components/HowItWorks';
 import { PrivacyPromise } from '@/components/PrivacyPromise';
 import { FAQ } from '@/components/FAQ';
+import { PassportHistorySection } from '@/components/PassportHistorySection';
 import { Footer } from '@/components/Footer';
 
 export default function Home() {
@@ -18,6 +19,7 @@ export default function Home() {
       <HowItWorks />
       <PrivacyPromise />
       <FAQ />
+      <PassportHistorySection />
       <Footer />
     </div>
   );
