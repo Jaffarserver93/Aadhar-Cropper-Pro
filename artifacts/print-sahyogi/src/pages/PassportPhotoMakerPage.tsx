@@ -157,19 +157,19 @@ async function makePassportCanvas(_file: File, bgBlob: Blob): Promise<HTMLCanvas
     const info = analyzePersonAlpha(srcW, srcH, pixels, sampledW, sampledH);
 
     // ── Step 2: compute crop region ───────────────────────────────────────────
-    // Layout (fractions of PHOTO_H):
-    //   0.07  — blank space above head
-    //   0.55  — head / face
-    //   0.38  — neck + visible shoulders
-    const HEAD_SPACE  = 0.07;   // above head
-    const FACE_FILL   = 0.55;   // head occupies this fraction of PHOTO_H
+    // Layout (fractions of frame):
+    //   vertical:   7% above head | 55% head | 38% neck+shoulders
+    //   horizontal: head fills 58% of frame width (side breathing room)
+    const HEAD_SPACE      = 0.07;
+    const FACE_FILL_V     = 0.55;  // head fraction of PHOTO_H
+    const FACE_FILL_H     = 0.58;  // head fraction of PHOTO_W (wider = more side space)
 
     let cropX: number, cropY: number, cropW: number, cropH: number;
 
     if (info) {
-      // cropH in source px: headHeight maps to FACE_FILL of PHOTO_H
-      cropH = info.headHeight / FACE_FILL;
-      cropW = cropH * (PHOTO_W / PHOTO_H);
+      const headWidthSrc = info.headHeight / 1.25; // reverse of headHeight = headWidth * 1.25
+      cropH = info.headHeight / FACE_FILL_V;
+      cropW = headWidthSrc / FACE_FILL_H;
 
       // top of crop = head top − blank margin
       cropY = info.headTop - HEAD_SPACE * cropH;

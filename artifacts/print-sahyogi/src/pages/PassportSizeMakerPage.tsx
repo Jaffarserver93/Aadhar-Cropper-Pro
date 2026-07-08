@@ -100,14 +100,17 @@ async function makePassportCanvas(_file: File, bgBlob: Blob): Promise<HTMLCanvas
 
     const info = analyzePersonAlpha(srcW, srcH, pixels, sampledW, sampledH);
 
-    // Layout: 7% space above head | 55% head | 38% neck+shoulders
-    const HEAD_SPACE = 0.07;
-    const FACE_FILL  = 0.55;
+    // Layout: 7% above head | 55% head (vertical) | 38% neck+shoulders
+    //         head fills 58% of frame width (wider = more side space)
+    const HEAD_SPACE  = 0.07;
+    const FACE_FILL_V = 0.55;
+    const FACE_FILL_H = 0.58;
 
     let cropX: number, cropY: number, cropW: number, cropH: number;
     if (info) {
-      cropH = info.headHeight / FACE_FILL;
-      cropW = cropH * (PHOTO_W / PHOTO_H);
+      const headWidthSrc = info.headHeight / 1.25;
+      cropH = info.headHeight / FACE_FILL_V;
+      cropW = headWidthSrc / FACE_FILL_H;
       cropY = info.headTop - HEAD_SPACE * cropH;
       cropX = info.centerX - cropW / 2;
     } else {
