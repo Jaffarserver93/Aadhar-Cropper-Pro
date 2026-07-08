@@ -185,9 +185,10 @@ interface PhotoRow {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function PassportSizeMakerPage() {
-  const [rows,       setRows]       = useState<PhotoRow[]>([]);
-  const [a4DataUrl,  setA4DataUrl]  = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
+  const [rows,        setRows]        = useState<PhotoRow[]>([]);
+  const [a4DataUrl,   setA4DataUrl]   = useState<string | null>(null);
+  const [isDragging,  setIsDragging]  = useState(false);
+  const [useWhiteBg,  setUseWhiteBg]  = useState(true);
   const [, navigate] = useLocation();
 
   const addFileRef   = useRef<HTMLInputElement>(null);
@@ -206,7 +207,7 @@ export default function PassportSizeMakerPage() {
 
   useEffect(() => () => abortMap.current.forEach(c => c.abort()), []);
 
-  const processFile = useCallback(async (file: File, rowId?: string) => {
+  const processFile = useCallback(async (file: File, rowId?: string, whiteBgOverride?: boolean) => {
     if (!file.type.startsWith('image/')) return;
     const id = rowId ?? crypto.randomUUID();
     abortMap.current.get(id)?.abort();
@@ -221,7 +222,11 @@ export default function PassportSizeMakerPage() {
     });
 
     try {
-      const bgBlob = await removeBg(file, ctrl.signal);
+      // When whiteBg is ON → call remove.bg; when OFF → use original file (saves credits)
+      const shouldRemoveBg = whiteBgOverride !== undefined ? whiteBgOverride : useWhiteBg;
+      const bgBlob: Blob = shouldRemoveBg
+        ? await removeBg(file, ctrl.signal)
+        : file;
       if (ctrl.signal.aborted) return;
       const canvas = await makePassportCanvas(file, bgBlob);
       if (ctrl.signal.aborted) return;
@@ -232,7 +237,7 @@ export default function PassportSizeMakerPage() {
       const error: PhotoRow = { id, status: 'error', canvas: null, dataUrl: null, error: friendlyError(err), copies: 1, brightness: 100 };
       setRows(prev => prev.map(r => r.id === id ? { ...error, copies: r.copies, brightness: r.brightness } : r));
     } finally { abortMap.current.delete(id); }
-  }, []);
+  }, [useWhiteBg]);
 
   const removeRow = (id: string) => { abortMap.current.get(id)?.abort(); setRows(prev => prev.filter(r => r.id !== id)); };
   const retryRow  = (id: string) => { retryFileRef.current?.setAttribute('data-row-id', id); retryFileRef.current?.click(); };
@@ -299,6 +304,28 @@ export default function PassportSizeMakerPage() {
 
           {/* ── Left: Controls ── */}
           <div className="flex-1 flex flex-col gap-4 min-w-0">
+
+            {/* Background removal toggle */}
+            <div className="flex items-center justify-between bg-white border border-gray-200 rounded-2xl px-4 py-3 shadow-sm">
+              <div className="flex flex-col">
+                <span className="text-sm font-semibold text-primary">AI White Background</span>
+                <span className="text-xs text-gray-400 mt-0.5">
+                  {useWhiteBg
+                    ? 'ON — remove.bg removes background (uses API credit)'
+                    : 'OFF — original photo cropped as-is (no credit used)'}
+                </span>
+              </div>
+              <button
+                role="switch"
+                aria-checked={useWhiteBg}
+                onClick={() => setUseWhiteBg(v => !v)}
+                className={`relative w-12 h-6 rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent shrink-0
+                  ${useWhiteBg ? 'bg-primary' : 'bg-gray-200'}`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200
+                  ${useWhiteBg ? 'translate-x-6' : 'translate-x-0'}`} />
+              </button>
+            </div>
 
             {/* Upload zone */}
             {rows.length === 0 && (
