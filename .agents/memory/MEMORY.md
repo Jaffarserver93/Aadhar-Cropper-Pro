@@ -1,2 +1,3 @@
 - [Vercel monorepo build](vercel-monorepo-build.md) — outputDirectory resolves relative to package CWD, not repo root; dist is gitignored so use `build/` as outDir name.
 - [EZONE custom auth](ezone-custom-auth.md) — Supabase auth replaced with username+SHA256 in Replit Postgres; Supabase kept only for registration_codes table.
+- [Picsart Ultra Enhance API contract](picsart-enhance-api.md) — response is JSON with a hosted result URL, not raw image bytes; must fetch it separately.

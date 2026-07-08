@@ -44,6 +44,37 @@ async function removeBg(file: File, signal: AbortSignal): Promise<Blob> {
   return res.blob();
 }
 
+// ── Picsart enhance proxy ─────────────────────────────────────────────────────
+// Runs after the white-background passport composite is built: upscales +
+// sharpens the final crop, which is then downsampled back to the exact print
+// size for a cleaner, less noisy result. Non-fatal — falls back to the
+// unenhanced composite if the service is unavailable.
+async function enhanceImage(blob: Blob, signal: AbortSignal): Promise<Blob> {
+  const form = new FormData();
+  form.append('image', blob, 'photo.png');
+  form.append('upscale_factor', '2');
+  form.append('format', 'PNG');
+  const res = await fetch('/api/enhance', { method: 'POST', body: form, signal });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error || `Enhance server error ${res.status}`);
+  }
+  return res.blob();
+}
+
+async function drawScaledToCanvas(blob: Blob, width: number, height: number): Promise<HTMLCanvasElement> {
+  const bmp = await createImageBitmap(blob);
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(bmp, 0, 0, width, height);
+    return canvas;
+  } finally {
+    bmp.close();
+  }
+}
+
 // ── Face detection ────────────────────────────────────────────────────────────
 interface FaceBox { x: number; y: number; width: number; height: number }
 
@@ -247,8 +278,23 @@ export default function PassportPhotoMakerPage() {
     try {
       const bgBlob = await removeBg(file, ctrl.signal);
       if (ctrl.signal.aborted) return;
-      const canvas = await makePassportCanvas(file, bgBlob);
+      let canvas = await makePassportCanvas(file, bgBlob);
       if (ctrl.signal.aborted) return;
+
+      // Enhance the white-background composite, then downsample back to the
+      // exact print size. If the enhance service is unavailable, keep going
+      // with the unenhanced composite rather than failing the whole row.
+      try {
+        const compositeBlob: Blob = await new Promise((resolve, reject) =>
+          canvas!.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/png'));
+        const enhancedBlob = await enhanceImage(compositeBlob, ctrl.signal);
+        if (ctrl.signal.aborted) return;
+        canvas = await drawScaledToCanvas(enhancedBlob, PHOTO_W, PHOTO_H);
+      } catch (enhanceErr) {
+        if ((enhanceErr as DOMException)?.name === 'AbortError') return;
+        console.warn('Photo enhance skipped:', enhanceErr);
+      }
+
       const done: PhotoRow = { id, status: 'done', canvas, dataUrl: canvas.toDataURL('image/png'), error: null, copies: 1 };
       setRows(prev => prev.map(r => r.id === id ? { ...done, copies: r.copies } : r));
     } catch (err) {

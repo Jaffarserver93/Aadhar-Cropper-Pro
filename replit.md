@@ -13,6 +13,7 @@ A web tool that lets users upload, unlock (password-protected), auto-crop, and p
 - Required env: `DATABASE_URL` — Postgres connection string
 - Required env: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` — Supabase auth
 - Required env: `REMOVEBG_API_KEY` — remove.bg background removal (via `/api/removebg` proxy)
+- Required env: `PICSART_API_KEY` — Picsart Ultra Enhance (via `/api/enhance` proxy)
 
 ## Stack
 
@@ -46,6 +47,7 @@ A web tool that lets users upload, unlock (password-protected), auto-crop, and p
 - Passport photo maker is entirely client-side (no server storage) — remove.bg call proxied through `/api/removebg` to keep API key server-side
 - Supabase used for auth only; DB schema lives in Drizzle (PostgreSQL)
 - Vercel `outputDirectory` resolves relative to package CWD → output to `build/` (not gitignored) within `artifacts/print-sahyogi/`
+- Passport photo maker: after remove.bg + white-background composite, the final crop is sent through the Picsart Ultra Enhance API (`/api/enhance`, `upscale_factor=2`) then downsampled back to the exact 35×45mm print size — improves sharpness/noise without changing output dimensions. Non-fatal: falls back to the unenhanced composite if the enhance call fails.
 
 ## User preferences
 
