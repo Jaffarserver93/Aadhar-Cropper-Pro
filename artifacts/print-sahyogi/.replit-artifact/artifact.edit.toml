@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "EZONE Helper"
+version = "1.0.0"
+id = "artifacts/print-sahyogi"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18207
+
+[services.development]
+run = "pnpm --filter @workspace/print-sahyogi run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/print-sahyogi", "run", "build" ]
+publicDir = "artifacts/print-sahyogi/dist"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
