@@ -103,10 +103,10 @@ function analyzePersonAlpha(
   }
   if (minY >= maxY || minX >= maxX) return null;
 
-  // ── 2. Scan the top 30% of the person to get HEAD width + center ───────────
-  // The head/face region is narrow compared to shoulders; using only the top
-  // part avoids shoulder-width inflating our estimate.
-  const headScanBottom = Math.round(minY + (maxY - minY) * 0.30);
+  // ── 2. Scan the top 18% of the person to get HEAD width + center ───────────
+  // Head sits in roughly the top 12% of a standing person's height.
+  // Scanning top 18% captures the skull without picking up wider shoulders.
+  const headScanBottom = Math.round(minY + (maxY - minY) * 0.18);
   let headMinX = sampledW, headMaxX = 0;
   for (let y = minY; y <= headScanBottom; y++) {
     for (let x = 0; x < sampledW; x++) {
