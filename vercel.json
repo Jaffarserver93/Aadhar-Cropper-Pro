@@ -3,6 +3,8 @@
   "outputDirectory": "artifacts/print-sahyogi/build",
   "framework": null,
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/api/removebg", "destination": "/api/removebg" },
+    { "source": "/api/enhance",  "destination": "/api/enhance"  },
+    { "source": "/(.*)",         "destination": "/index.html"   }
   ]
 }
