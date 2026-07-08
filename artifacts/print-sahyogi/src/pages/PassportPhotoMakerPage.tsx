@@ -75,33 +75,85 @@ async function drawScaledToCanvas(blob: Blob, width: number, height: number): Pr
   }
 }
 
+// ── Smart bounding-box scan (downsampled for speed) ───────────────────────────
+function findPersonBounds(srcW: number, srcH: number, pixels: Uint8ClampedArray, sampledW: number, sampledH: number) {
+  let minY = sampledH, maxY = 0, minX = sampledW, maxX = 0;
+  for (let y = 0; y < sampledH; y++) {
+    for (let x = 0; x < sampledW; x++) {
+      const alpha = pixels[(y * sampledW + x) * 4 + 3];
+      if (alpha > 30) {
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+      }
+    }
+  }
+  if (minY >= maxY || minX >= maxX) return null;
+  // Scale back to source coordinates
+  const sx = srcW / sampledW, sy = srcH / sampledH;
+  return { top: minY * sy, bottom: maxY * sy, left: minX * sx, right: maxX * sx };
+}
+
 // ── Passport crop ─────────────────────────────────────────────────────────────
-// No auto face-detection/zoom — the whole background-removed photo is simply
-// centered and scaled to fill the frame (uniform "cover" fit), so heads,
-// shoulders, etc. are kept exactly as the user framed them.
+// Scans the alpha channel of the background-removed image to find the person's
+// exact bounding box, then positions the crop so:
+//   - ~8% blank space above the top of the head  (≈ 3.6 mm on a 45 mm frame)
+//   - person (head → shoulders) fills ≈ 82% of the frame height
+//   - horizontally centred on the person
 async function makePassportCanvas(_file: File, bgBlob: Blob): Promise<HTMLCanvasElement> {
   const bgBmp = await createImageBitmap(bgBlob);
   const srcW = bgBmp.width, srcH = bgBmp.height;
 
   try {
-    // Cover-fit: scale so the image fills the target frame entirely, cropping
-    // equally from the longer dimension, centered — no face/person detection.
-    const targetAr = PHOTO_W / PHOTO_H;
-    const srcAr = srcW / srcH;
-    let cropX = 0, cropY = 0, cropW = srcW, cropH = srcH;
-    if (srcAr > targetAr) {
-      cropW = srcH * targetAr;
-      cropX = (srcW - cropW) / 2;
+    // ── Step 1: scan at reduced resolution to find person bounds quickly ──────
+    const SCAN_MAX = 400;
+    const scale    = Math.min(1, SCAN_MAX / Math.max(srcW, srcH));
+    const sampledW = Math.round(srcW * scale);
+    const sampledH = Math.round(srcH * scale);
+
+    const scanCanvas = document.createElement('canvas');
+    scanCanvas.width = sampledW; scanCanvas.height = sampledH;
+    const scanCtx = scanCanvas.getContext('2d')!;
+    scanCtx.drawImage(bgBmp, 0, 0, sampledW, sampledH);
+    const pixels = scanCtx.getImageData(0, 0, sampledW, sampledH).data;
+
+    const bounds = findPersonBounds(srcW, srcH, pixels, sampledW, sampledH);
+
+    // ── Step 2: compute crop region ───────────────────────────────────────────
+    // Passport standard: 8% blank above head, person fills 82% of frame height
+    const HEAD_SPACE = 0.08;   // fraction of PHOTO_H above head
+    const PERSON_FILL = 0.82;  // fraction of PHOTO_H the person should span
+
+    let cropX: number, cropY: number, cropW: number, cropH: number;
+
+    if (bounds) {
+      const personH = bounds.bottom - bounds.top;
+      const personCX = (bounds.left + bounds.right) / 2;
+
+      // Source pixels that map to PHOTO_H
+      cropH = personH / PERSON_FILL;
+      cropW = cropH * (PHOTO_W / PHOTO_H);
+
+      // Top of crop = head top minus the blank-space margin
+      cropY = bounds.top - HEAD_SPACE * cropH;
+      cropX = personCX - cropW / 2;
     } else {
-      cropH = srcW / targetAr;
-      cropY = (srcH - cropH) / 2;
+      // Fallback: simple center cover-fit
+      const targetAr = PHOTO_W / PHOTO_H;
+      const srcAr = srcW / srcH;
+      cropX = 0; cropY = 0; cropW = srcW; cropH = srcH;
+      if (srcAr > targetAr) { cropW = srcH * targetAr; cropX = (srcW - cropW) / 2; }
+      else                  { cropH = srcW / targetAr; cropY = (srcH - cropH) / 2; }
     }
 
-    cropX = Math.max(0, Math.min(srcW - 1, cropX));
-    cropY = Math.max(0, Math.min(srcH - 1, cropY));
-    cropW = Math.max(1, Math.min(srcW - cropX, cropW));
-    cropH = Math.max(1, Math.min(srcH - cropY, cropH));
+    // Clamp so we never go out of bounds
+    cropX = Math.max(0, Math.min(srcW - cropW, cropX));
+    cropY = Math.max(0, Math.min(srcH - cropH, cropY));
+    cropW = Math.min(cropW, srcW - cropX);
+    cropH = Math.min(cropH, srcH - cropY);
 
+    // ── Step 3: draw final canvas ─────────────────────────────────────────────
     const canvas = document.createElement('canvas');
     canvas.width = PHOTO_W; canvas.height = PHOTO_H;
     const ctx = canvas.getContext('2d')!;
