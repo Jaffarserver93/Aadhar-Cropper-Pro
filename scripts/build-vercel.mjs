@@ -19,13 +19,12 @@ const VITE_OUT = path.join(PACKAGE_DIR, 'build'); // vite outDir (non-Vercel pat
 const VERCEL_OUT = path.join(ROOT, '.vercel', 'output');
 
 // ── 1. Run Vite build ──────────────────────────────────────────────────────
-// Run WITHOUT VERCEL=1 so vite outputs to the package-local `build/` dir,
-// which is a clean known path we can reliably find and copy from.
+// vite.config.ts always outputs to the package-local `build/` dir
+// unconditionally, so this works the same regardless of env vars.
 console.log('\n▶ Running Vite build…');
 execSync('pnpm --filter @workspace/print-sahyogi run build', {
   cwd: ROOT,
   stdio: 'inherit',
-  env: { ...process.env, VERCEL: '' }, // clear so vite uses local build/ path
 });
 
 if (!existsSync(path.join(VITE_OUT, 'index.html'))) {

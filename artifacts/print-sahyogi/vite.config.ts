@@ -4,17 +4,16 @@ import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 
 const isReplit = Boolean(process.env.REPL_ID);
-const isVercel = Boolean(process.env.VERCEL);
 
 const port = Number(process.env.PORT) || 3000;
 const basePath = process.env.BASE_PATH || '/';
 
-// Output to the package-local `build/` dir. The Vercel build script
-// (scripts/build-vercel.mjs) copies this into .vercel/output/static/.
-// Locally / Replit: keep using `dist`.
-const outDir = isVercel
-  ? path.resolve(import.meta.dirname, 'build')
-  : path.resolve(import.meta.dirname, 'dist');
+// Always output to the package-local `build/` dir, regardless of
+// environment. The Vercel build script (scripts/build-vercel.mjs) copies
+// this into .vercel/output/static/. Keeping this unconditional avoids any
+// dependency on env vars (e.g. VERCEL) being set consistently across
+// contexts.
+const outDir = path.resolve(import.meta.dirname, 'build');
 
 export default defineConfig(async () => {
   const plugins = [react(), tailwindcss()];
