@@ -266,37 +266,33 @@ export default function PassportSizeMakerPage() {
     <div className="min-h-screen bg-white flex flex-col">
       <Navbar />
 
-      {/* ── Hero / Page header ── */}
-      <section className="bg-gray-50 border-b border-gray-100 py-10 px-4">
-        <div className="max-w-4xl mx-auto text-center">
+      {/* Breadcrumb / back bar */}
+      <div className="bg-gray-50 border-b border-gray-100">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-2 text-sm text-gray-500">
           <button
             onClick={() => navigate('/')}
-            className="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-primary transition-colors mb-4"
+            className="flex items-center gap-1.5 hover:text-primary transition-colors font-medium"
           >
-            <ArrowLeft className="w-3.5 h-3.5" /> Back to Home
+            <ArrowLeft className="w-4 h-4" />
+            All Tools
           </button>
-          <div className="inline-flex items-center gap-2 bg-accent/10 text-accent text-xs font-semibold px-3 py-1 rounded-full mb-3">
-            <ImageIcon className="w-3.5 h-3.5" /> Passport Size Photo Maker
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-primary leading-tight">
-            Print-Ready Passport Photos
+          <span className="text-gray-300">/</span>
+          <span className="text-primary font-semibold">Passport Size Photo Maker</span>
+        </div>
+      </div>
+
+      {/* Page header */}
+      <div className="bg-white border-b border-gray-100">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-primary">
+            Passport Size Photo Maker
           </h1>
-          <p className="mt-3 text-gray-500 max-w-xl mx-auto text-base">
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">
             Upload a photo — we remove the background, crop your face to exact <strong>35×45 mm</strong> Indian passport standard,
             and arrange up to <strong>{MAX_ROWS * PER_ROW} copies</strong> on an A4 sheet. All inside your browser.
           </p>
-          <div className="mt-5 flex flex-wrap justify-center gap-3">
-            {[
-              '✦ Exact 35×45 mm',
-              '✦ White background',
-              '✦ 300 DPI lossless PDF',
-              `✦ Up to ${MAX_ROWS} rows / ${MAX_ROWS * PER_ROW} photos`,
-            ].map(f => (
-              <span key={f} className="text-xs font-medium bg-white border border-gray-200 text-gray-600 px-3 py-1 rounded-full shadow-sm">{f}</span>
-            ))}
-          </div>
         </div>
-      </section>
+      </div>
 
       {/* ── Tool ── */}
       <section className="flex-1 py-8 px-4 sm:px-6">
