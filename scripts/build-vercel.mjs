@@ -43,11 +43,15 @@ cpSync(VITE_OUT, path.join(VERCEL_OUT, 'static'), { recursive: true });
 console.log(`  ✓ Copied static assets from ${path.relative(ROOT, VITE_OUT)}`);
 
 // ── 4. Set up /api/removebg serverless function ───────────────────────────
+// The handler source uses ESM (`export default`). Vercel's Node runtime
+// treats a plain `.js` file as CommonJS unless told otherwise, which makes
+// `export default` a syntax error at load time. Use `.mjs` so it's
+// unambiguously loaded as an ES module.
 const funcDir = path.join(VERCEL_OUT, 'functions', 'api', 'removebg.func');
-cpSync(path.join(ROOT, 'api', 'removebg.js'), path.join(funcDir, 'index.js'));
+cpSync(path.join(ROOT, 'api', 'removebg.js'), path.join(funcDir, 'index.mjs'));
 writeFileSync(path.join(funcDir, '.vc-config.json'), JSON.stringify({
   runtime: 'nodejs20.x',
-  handler: 'index.js',
+  handler: 'index.mjs',
   launcherType: 'Nodejs',
   shouldAddHelpers: true,
 }));
