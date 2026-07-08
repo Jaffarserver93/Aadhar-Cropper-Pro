@@ -39,74 +39,19 @@ async function removeBg(file: File, signal: AbortSignal): Promise<Blob> {
   return res.blob();
 }
 
-// ── Face detection ────────────────────────────────────────────────────────────
-interface FaceBox { x: number; y: number; width: number; height: number }
-
-async function detectFace(file: File): Promise<{ box: FaceBox; origW: number; origH: number } | null> {
-  if (!('FaceDetector' in window)) return null;
-  try {
-    const bmp = await createImageBitmap(file);
-    const origW = bmp.width, origH = bmp.height;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const det = new (window as any).FaceDetector({ fastMode: false, maxDetectedFaces: 3 });
-    const faces: any[] = await det.detect(bmp);
-    bmp.close();
-    if (!faces.length) return null;
-    const best = faces.reduce((a: any, b: any) =>
-      b.boundingBox.width * b.boundingBox.height > a.boundingBox.width * a.boundingBox.height ? b : a);
-    return { box: best.boundingBox as FaceBox, origW, origH };
-  } catch { return null; }
-}
-
-async function scanBbox(bmp: ImageBitmap): Promise<{ top: number; bottom: number; left: number; right: number } | null> {
-  const S = 0.15;
-  const sw = Math.max(1, Math.round(bmp.width * S)), sh = Math.max(1, Math.round(bmp.height * S));
-  const c = document.createElement('canvas'); c.width = sw; c.height = sh;
-  const ctx = c.getContext('2d')!; ctx.drawImage(bmp, 0, 0, sw, sh);
-  const { data } = ctx.getImageData(0, 0, sw, sh);
-  let top = sh, bottom = -1, left = sw, right = -1;
-  for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++)
-    if (data[(y * sw + x) * 4 + 3] > 20) {
-      if (y < top) top = y; if (y > bottom) bottom = y;
-      if (x < left) left = x; if (x > right) right = x;
-    }
-  if (bottom < 0) return null;
-  return { top: Math.round(top / S), bottom: Math.round(bottom / S), left: Math.round(left / S), right: Math.round(right / S) };
-}
-
-async function makePassportCanvas(file: File, bgBlob: Blob): Promise<HTMLCanvasElement> {
-  const face = await detectFace(file);
+// ── Passport resize ────────────────────────────────────────────────────────────
+// No face/person detection, no cropping — the entire background-removed photo
+// is simply resized to exactly fill the 35×45mm frame, so nothing from the
+// original photo is ever cut off.
+async function makePassportCanvas(_file: File, bgBlob: Blob): Promise<HTMLCanvasElement> {
   const bgBmp = await createImageBitmap(bgBlob);
   const srcW = bgBmp.width, srcH = bgBmp.height;
   try {
-    let cropX = 0, cropY = 0, cropW = srcW, cropH = srcH;
-    if (face) {
-      const { box, origW, origH } = face;
-      const sx = srcW / origW, sy = srcH / origH;
-      const fX = box.x * sx, fY = box.y * sy, fW = box.width * sx, fH = box.height * sy;
-      const headH = fH * 1.35, faceCX = fX + fW / 2, eyeY = fY + fH * 0.45;
-      const scale = (PHOTO_H * 0.75) / headH;
-      cropW = PHOTO_W / scale; cropH = PHOTO_H / scale;
-      cropY = eyeY - (PHOTO_H * 0.35) / scale; cropX = faceCX - cropW / 2;
-    } else {
-      const bbox = await scanBbox(bgBmp);
-      if (bbox) {
-        const pW = Math.max(1, bbox.right - bbox.left), pH = Math.max(1, bbox.bottom - bbox.top);
-        const cx = bbox.left + pW / 2, ar = pH / pW;
-        const headFrac = ar > 3.0 ? 0.15 : ar > 1.8 ? 0.25 : ar > 1.0 ? 0.38 : 0.65;
-        const headH = Math.max(40, pH * headFrac), scale = (PHOTO_H * 0.75) / headH;
-        cropW = Math.max(1, PHOTO_W / scale); cropH = Math.max(1, PHOTO_H / scale);
-        cropY = (bbox.top + headH * 0.5) - (PHOTO_H * 0.35) / scale; cropX = cx - cropW / 2;
-      }
-    }
-    cropX = Math.max(0, Math.min(srcW - 1, cropX)); cropY = Math.max(0, Math.min(srcH - 1, cropY));
-    cropW = Math.max(1, Math.min(srcW - cropX, cropW)); cropH = Math.max(1, Math.min(srcH - cropY, cropH));
-
     const canvas = document.createElement('canvas');
     canvas.width = PHOTO_W; canvas.height = PHOTO_H;
     const ctx = canvas.getContext('2d')!;
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, PHOTO_W, PHOTO_H);
-    ctx.drawImage(bgBmp, cropX, cropY, cropW, cropH, BORDER, BORDER, PHOTO_W - 2 * BORDER, PHOTO_H - 2 * BORDER);
+    ctx.drawImage(bgBmp, 0, 0, srcW, srcH, BORDER, BORDER, PHOTO_W - 2 * BORDER, PHOTO_H - 2 * BORDER);
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, PHOTO_W, BORDER);
     ctx.fillRect(0, PHOTO_H - BORDER, PHOTO_W, BORDER);
@@ -246,7 +191,7 @@ export default function PassportSizeMakerPage() {
             Print-Ready Passport Photos
           </h1>
           <p className="mt-3 text-gray-500 max-w-xl mx-auto text-base">
-            Upload a photo — we remove the background, crop your face to exact <strong>35×45 mm</strong> Indian passport standard,
+            Upload a photo — we remove the background, resize it to exact <strong>35×45 mm</strong> Indian passport standard,
             and arrange up to <strong>{MAX_ROWS * PER_ROW} copies</strong> on an A4 sheet. All inside your browser.
           </p>
           <div className="mt-5 flex flex-wrap justify-center gap-3">
@@ -332,7 +277,7 @@ export default function PassportSizeMakerPage() {
                       {row.status === 'processing' && (
                         <div className="flex items-center gap-3 text-gray-500 text-sm py-2">
                           <Loader2 className="w-5 h-5 animate-spin text-accent shrink-0" />
-                          <span>Removing background &amp; cropping face…</span>
+                          <span>Removing background &amp; resizing…</span>
                         </div>
                       )}
 
@@ -472,7 +417,7 @@ export default function PassportSizeMakerPage() {
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             {[
               { n: '1', t: 'Upload', d: 'Select a clear, front-facing photo in JPG, PNG or WEBP format.' },
-              { n: '2', t: 'Auto-process', d: 'We remove the background and crop your face to passport standard.' },
+              { n: '2', t: 'Auto-process', d: 'We remove the background and resize your photo to passport standard.' },
               { n: '3', t: 'Set copies', d: 'Use − and + to choose how many rows (5 photos each) you need.' },
               { n: '4', t: 'Download', d: 'Get a 300 DPI lossless A4 PDF, ready to print and cut.' },
             ].map(s => (
