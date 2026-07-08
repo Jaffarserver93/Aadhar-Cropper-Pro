@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  UploadCloud, Download, AlertCircle, CheckCircle2, X, Loader2, Plus, Minus, ImageIcon, ArrowLeft,
+  UploadCloud, Download, AlertCircle, CheckCircle2, X, Loader2, Plus, Minus, ImageIcon, ArrowLeft, Sun,
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Navbar } from '@/components/Navbar';
@@ -141,13 +141,14 @@ async function makePassportCanvas(_file: File, bgBlob: Blob): Promise<HTMLCanvas
   } finally { bgBmp.close(); }
 }
 
-function buildA4Canvas(entries: { canvas: HTMLCanvasElement; copies: number }[]): HTMLCanvasElement {
+function buildA4Canvas(entries: { canvas: HTMLCanvasElement; copies: number; brightness: number }[]): HTMLCanvasElement {
   const a4 = document.createElement('canvas');
   a4.width = A4_W; a4.height = A4_H;
   const ctx = a4.getContext('2d')!;
   ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, A4_W, A4_H);
   let rowIdx = 0;
-  for (const { canvas, copies } of entries) {
+  for (const { canvas, copies, brightness } of entries) {
+    ctx.filter = brightness === 100 ? 'none' : `brightness(${brightness}%)`;
     for (let c = 0; c < copies; c++) {
       const y = MARGIN_T + rowIdx * (PHOTO_H + ROW_GAP);
       for (let col = 0; col < PER_ROW; col++)
@@ -155,10 +156,11 @@ function buildA4Canvas(entries: { canvas: HTMLCanvasElement; copies: number }[])
       rowIdx++;
     }
   }
+  ctx.filter = 'none';
   return a4;
 }
 
-function downloadPdf(entries: { canvas: HTMLCanvasElement; copies: number }[], totalRows: number) {
+function downloadPdf(entries: { canvas: HTMLCanvasElement; copies: number; brightness: number }[], totalRows: number) {
   const imgData = buildA4Canvas(entries).toDataURL('image/png');
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: false });
   pdf.addImage(imgData, 'PNG', 0, 0, 210, 297, undefined, 'NONE');
@@ -178,6 +180,7 @@ interface PhotoRow {
   dataUrl: string | null;
   error: string | null;
   copies: number;
+  brightness: number;
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -196,7 +199,7 @@ export default function PassportSizeMakerPage() {
   const doneRows    = rows.filter(r => r.status === 'done');
 
   useEffect(() => {
-    const entries = rows.filter(r => r.status === 'done' && r.canvas).map(r => ({ canvas: r.canvas!, copies: r.copies }));
+    const entries = rows.filter(r => r.status === 'done' && r.canvas).map(r => ({ canvas: r.canvas!, copies: r.copies, brightness: r.brightness }));
     if (!entries.length) { setA4DataUrl(null); return; }
     setA4DataUrl(buildA4Canvas(entries).toDataURL('image/png'));
   }, [rows]);
@@ -210,10 +213,10 @@ export default function PassportSizeMakerPage() {
     const ctrl = new AbortController();
     abortMap.current.set(id, ctrl);
 
-    const processing: PhotoRow = { id, status: 'processing', canvas: null, dataUrl: null, error: null, copies: 1 };
+    const processing: PhotoRow = { id, status: 'processing', canvas: null, dataUrl: null, error: null, copies: 1, brightness: 100 };
     setRows(prev => {
       const idx = prev.findIndex(r => r.id === id);
-      if (idx >= 0) { const n = [...prev]; n[idx] = { ...n[idx], ...processing, copies: n[idx].copies }; return n; }
+      if (idx >= 0) { const n = [...prev]; n[idx] = { ...n[idx], ...processing, copies: n[idx].copies, brightness: n[idx].brightness }; return n; }
       return [...prev, processing];
     });
 
@@ -222,12 +225,12 @@ export default function PassportSizeMakerPage() {
       if (ctrl.signal.aborted) return;
       const canvas = await makePassportCanvas(file, bgBlob);
       if (ctrl.signal.aborted) return;
-      const done: PhotoRow = { id, status: 'done', canvas, dataUrl: canvas.toDataURL('image/png'), error: null, copies: 1 };
-      setRows(prev => prev.map(r => r.id === id ? { ...done, copies: r.copies } : r));
+      const done: PhotoRow = { id, status: 'done', canvas, dataUrl: canvas.toDataURL('image/png'), error: null, copies: 1, brightness: 100 };
+      setRows(prev => prev.map(r => r.id === id ? { ...done, copies: r.copies, brightness: r.brightness } : r));
     } catch (err) {
       if ((err as DOMException)?.name === 'AbortError') return;
-      const error: PhotoRow = { id, status: 'error', canvas: null, dataUrl: null, error: friendlyError(err), copies: 1 };
-      setRows(prev => prev.map(r => r.id === id ? { ...error, copies: r.copies } : r));
+      const error: PhotoRow = { id, status: 'error', canvas: null, dataUrl: null, error: friendlyError(err), copies: 1, brightness: 100 };
+      setRows(prev => prev.map(r => r.id === id ? { ...error, copies: r.copies, brightness: r.brightness } : r));
     } finally { abortMap.current.delete(id); }
   }, []);
 
@@ -242,12 +245,15 @@ export default function PassportSizeMakerPage() {
     }));
   };
 
+  const setBrightness = (id: string, value: number) =>
+    setRows(prev => prev.map(r => r.id === id ? { ...r, brightness: value } : r));
+
   const onDragOver  = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
   const onDragLeave = () => setIsDragging(false);
   const onDrop      = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files[0]; if (f && canAdd) processFile(f); };
 
   const handleDownload = () => {
-    const entries = rows.filter(r => r.canvas).map(r => ({ canvas: r.canvas!, copies: r.copies }));
+    const entries = rows.filter(r => r.canvas).map(r => ({ canvas: r.canvas!, copies: r.copies, brightness: r.brightness }));
     if (entries.length) downloadPdf(entries, totalCopies);
   };
 
@@ -370,9 +376,30 @@ export default function PassportSizeMakerPage() {
                               <div key={i}
                                 className="flex-1 rounded-lg overflow-hidden border border-gray-200 shadow-sm"
                                 style={{ aspectRatio: '35/45', background: '#fff' }}>
-                                <img src={row.dataUrl!} alt="" className="w-full h-full object-cover block" style={{ background: '#fff' }} />
+                                <img
+                                  src={row.dataUrl!} alt=""
+                                  className="w-full h-full object-cover block"
+                                  style={{ background: '#fff', filter: row.brightness !== 100 ? `brightness(${row.brightness}%)` : undefined }}
+                                />
                               </div>
                             ))}
+                          </div>
+
+                          {/* Brightness slider */}
+                          <div className="flex items-center gap-3">
+                            <Sun className="w-4 h-4 text-gray-400 shrink-0" />
+                            <input
+                              type="range" min={50} max={160} step={1}
+                              value={row.brightness}
+                              onChange={e => setBrightness(row.id, Number(e.target.value))}
+                              className="flex-1 h-1.5 rounded-full accent-primary cursor-pointer"
+                            />
+                            <button
+                              onClick={() => setBrightness(row.id, 100)}
+                              className="text-[11px] text-gray-400 hover:text-primary transition-colors w-8 text-right shrink-0"
+                            >
+                              {row.brightness}%
+                            </button>
                           </div>
 
                           {/* Copies counter */}
