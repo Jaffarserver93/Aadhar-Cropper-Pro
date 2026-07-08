@@ -59,9 +59,12 @@ writeFileSync(path.join(VERCEL_OUT, 'config.json'), JSON.stringify({
       headers: { 'Cache-Control': 'public, max-age=31536000, immutable' },
       continue: true,
     },
+    // Check the filesystem (static files + auto-built functions, e.g.
+    // /api/removebg from api/removebg.js) before falling back to the SPA.
+    // Without this, custom `routes` fully replace default routing and
+    // /api/* requests never reach the function — they just 404.
+    { handle: 'filesystem' },
     // SPA fallback — everything except /api/* → index.html.
-    // /api/removebg is left unmatched here so Vercel's auto-built
-    // function (from api/removebg.js) handles it directly.
     { src: '^/((?!api/).*)$', dest: '/index.html' },
   ],
 }, null, 2));
