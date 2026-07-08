@@ -75,87 +75,26 @@ async function drawScaledToCanvas(blob: Blob, width: number, height: number): Pr
   }
 }
 
-// ── Face detection ────────────────────────────────────────────────────────────
-interface FaceBox { x: number; y: number; width: number; height: number }
-
-async function detectFaceInOriginal(file: File): Promise<{ box: FaceBox; origW: number; origH: number } | null> {
-  if (!('FaceDetector' in window)) return null;
-  try {
-    const bmp = await createImageBitmap(file);
-    const origW = bmp.width, origH = bmp.height;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const detector = new (window as any).FaceDetector({ fastMode: false, maxDetectedFaces: 3 });
-    const faces: any[] = await detector.detect(bmp);
-    bmp.close();
-    if (!faces.length) return null;
-    const best = faces.reduce((a: any, b: any) =>
-      b.boundingBox.width * b.boundingBox.height > a.boundingBox.width * a.boundingBox.height ? b : a
-    );
-    return { box: best.boundingBox as FaceBox, origW, origH };
-  } catch { return null; }
-}
-
-async function scanPersonBbox(bmp: ImageBitmap): Promise<{ top: number; bottom: number; left: number; right: number } | null> {
-  const SCALE = 0.15;
-  const sw = Math.max(1, Math.round(bmp.width * SCALE));
-  const sh = Math.max(1, Math.round(bmp.height * SCALE));
-  const c = document.createElement('canvas');
-  c.width = sw; c.height = sh;
-  const ctx = c.getContext('2d')!;
-  ctx.drawImage(bmp, 0, 0, sw, sh);
-  const { data } = ctx.getImageData(0, 0, sw, sh);
-  let top = sh, bottom = -1, left = sw, right = -1;
-  for (let y = 0; y < sh; y++) {
-    for (let x = 0; x < sw; x++) {
-      if (data[(y * sw + x) * 4 + 3] > 20) {
-        if (y < top) top = y; if (y > bottom) bottom = y;
-        if (x < left) left = x; if (x > right) right = x;
-      }
-    }
-  }
-  if (bottom < 0 || right < 0) return null;
-  return {
-    top: Math.round(top / SCALE), bottom: Math.round(bottom / SCALE),
-    left: Math.round(left / SCALE), right: Math.round(right / SCALE),
-  };
-}
-
 // ── Passport crop ─────────────────────────────────────────────────────────────
-async function makePassportCanvas(file: File, bgBlob: Blob): Promise<HTMLCanvasElement> {
-  const faceResult = await detectFaceInOriginal(file);
+// No auto face-detection/zoom — the whole background-removed photo is simply
+// centered and scaled to fill the frame (uniform "cover" fit), so heads,
+// shoulders, etc. are kept exactly as the user framed them.
+async function makePassportCanvas(_file: File, bgBlob: Blob): Promise<HTMLCanvasElement> {
   const bgBmp = await createImageBitmap(bgBlob);
   const srcW = bgBmp.width, srcH = bgBmp.height;
 
   try {
+    // Cover-fit: scale so the image fills the target frame entirely, cropping
+    // equally from the longer dimension, centered — no face/person detection.
+    const targetAr = PHOTO_W / PHOTO_H;
+    const srcAr = srcW / srcH;
     let cropX = 0, cropY = 0, cropW = srcW, cropH = srcH;
-
-    if (faceResult) {
-      const { box, origW, origH } = faceResult;
-      const sx = srcW / origW, sy = srcH / origH;
-      const fX = box.x * sx, fY = box.y * sy;
-      const fW = box.width * sx, fH = box.height * sy;
-      const headH = fH * 1.35;
-      const faceCX = fX + fW / 2;
-      const eyeY = fY + fH * 0.45;
-      const scale = (PHOTO_H * 0.75) / headH;
-      cropW = PHOTO_W / scale; cropH = PHOTO_H / scale;
-      cropY = eyeY - (PHOTO_H * 0.35) / scale;
-      cropX = faceCX - cropW / 2;
+    if (srcAr > targetAr) {
+      cropW = srcH * targetAr;
+      cropX = (srcW - cropW) / 2;
     } else {
-      const bbox = await scanPersonBbox(bgBmp);
-      if (bbox) {
-        const pW = Math.max(1, bbox.right - bbox.left);
-        const pH = Math.max(1, bbox.bottom - bbox.top);
-        const cx = bbox.left + pW / 2;
-        const ar = pH / pW;
-        const headFrac = ar > 3.0 ? 0.15 : ar > 1.8 ? 0.25 : ar > 1.0 ? 0.38 : 0.65;
-        const headH = Math.max(40, pH * headFrac);
-        const scale = (PHOTO_H * 0.75) / headH;
-        cropW = Math.max(1, PHOTO_W / scale); cropH = Math.max(1, PHOTO_H / scale);
-        const headCY = bbox.top + headH * 0.50;
-        cropY = headCY - (PHOTO_H * 0.35) / scale;
-        cropX = cx - cropW / 2;
-      }
+      cropH = srcW / targetAr;
+      cropY = (srcH - cropH) / 2;
     }
 
     cropX = Math.max(0, Math.min(srcW - 1, cropX));
