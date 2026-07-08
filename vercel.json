@@ -1,0 +1,8 @@
+{
+  "buildCommand": "pnpm --filter @workspace/print-sahyogi run build",
+  "outputDirectory": "artifacts/print-sahyogi/build",
+  "framework": null,
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
