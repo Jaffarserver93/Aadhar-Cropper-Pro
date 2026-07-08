@@ -158,11 +158,11 @@ async function makePassportCanvas(_file: File, bgBlob: Blob): Promise<HTMLCanvas
 
     // ── Step 2: compute crop region ───────────────────────────────────────────
     // Layout (fractions of PHOTO_H):
-    //   0.08  — blank space above head
-    //   0.65  — head / face
-    //   0.27  — neck + upper shoulders
-    const HEAD_SPACE  = 0.08;   // above head
-    const FACE_FILL   = 0.65;   // head occupies this fraction of PHOTO_H
+    //   0.07  — blank space above head
+    //   0.55  — head / face
+    //   0.38  — neck + visible shoulders
+    const HEAD_SPACE  = 0.07;   // above head
+    const FACE_FILL   = 0.55;   // head occupies this fraction of PHOTO_H
 
     let cropX: number, cropY: number, cropW: number, cropH: number;
 
