@@ -75,15 +75,33 @@ async function drawScaledToCanvas(blob: Blob, width: number, height: number): Pr
   }
 }
 
-// ── Passport resize ────────────────────────────────────────────────────────────
-// No cropping at all, no face/person detection — the entire background-removed
-// photo is simply resized (stretched if needed) to exactly fill the 35×45mm
-// frame, so nothing from the original photo is ever cut off.
+// ── Passport crop ─────────────────────────────────────────────────────────────
+// No auto face-detection/zoom — the whole background-removed photo is simply
+// centered and scaled to fill the frame (uniform "cover" fit), so heads,
+// shoulders, etc. are kept exactly as the user framed them.
 async function makePassportCanvas(_file: File, bgBlob: Blob): Promise<HTMLCanvasElement> {
   const bgBmp = await createImageBitmap(bgBlob);
   const srcW = bgBmp.width, srcH = bgBmp.height;
 
   try {
+    // Cover-fit: scale so the image fills the target frame entirely, cropping
+    // equally from the longer dimension, centered — no face/person detection.
+    const targetAr = PHOTO_W / PHOTO_H;
+    const srcAr = srcW / srcH;
+    let cropX = 0, cropY = 0, cropW = srcW, cropH = srcH;
+    if (srcAr > targetAr) {
+      cropW = srcH * targetAr;
+      cropX = (srcW - cropW) / 2;
+    } else {
+      cropH = srcW / targetAr;
+      cropY = (srcH - cropH) / 2;
+    }
+
+    cropX = Math.max(0, Math.min(srcW - 1, cropX));
+    cropY = Math.max(0, Math.min(srcH - 1, cropY));
+    cropW = Math.max(1, Math.min(srcW - cropX, cropW));
+    cropH = Math.max(1, Math.min(srcH - cropY, cropH));
+
     const canvas = document.createElement('canvas');
     canvas.width = PHOTO_W; canvas.height = PHOTO_H;
     const ctx = canvas.getContext('2d')!;
@@ -92,8 +110,8 @@ async function makePassportCanvas(_file: File, bgBlob: Blob): Promise<HTMLCanvas
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, PHOTO_W, PHOTO_H);
 
-    // Whole photo, resized (not cropped) to fill inside the 0.5 mm border
-    ctx.drawImage(bgBmp, 0, 0, srcW, srcH, BORDER, BORDER, PHOTO_W - 2 * BORDER, PHOTO_H - 2 * BORDER);
+    // Photo content inside 0.5 mm border
+    ctx.drawImage(bgBmp, cropX, cropY, cropW, cropH, BORDER, BORDER, PHOTO_W - 2 * BORDER, PHOTO_H - 2 * BORDER);
 
     // 0.5 mm black border
     ctx.fillStyle = '#000000';
@@ -370,7 +388,7 @@ export default function PassportPhotoMakerPage() {
                       {row.status === 'processing' && (
                         <div className="flex items-center gap-3 text-slate-400 text-sm">
                           <Loader2 className="w-5 h-5 animate-spin text-blue-400 shrink-0" />
-                          <span className="truncate">Removing background &amp; resizing…</span>
+                          <span className="truncate">Removing background &amp; cropping…</span>
                         </div>
                       )}
 
