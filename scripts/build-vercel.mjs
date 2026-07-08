@@ -9,7 +9,7 @@
  */
 
 import { execSync } from 'child_process';
-import { mkdirSync, cpSync, writeFileSync, rmSync, existsSync, readFileSync } from 'fs';
+import { mkdirSync, cpSync, writeFileSync, rmSync, existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -33,43 +33,35 @@ if (!existsSync(path.join(VITE_OUT, 'index.html'))) {
 }
 
 // ── 2. Create .vercel/output structure ────────────────────────────────────
+// NOTE: we deliberately do NOT build the /api/removebg function ourselves.
+// Vercel always auto-detects and builds any file under the repo-root
+// `api/` directory as a Serverless Function (zero-config), independently
+// of this custom buildCommand / Build Output API static output. Manually
+// placing our own function under .vercel/output/functions previously
+// collided with that auto-built one and produced 404s. We only emit the
+// static output + routing config here; Vercel merges in the api/ function
+// automatically at deploy time.
 console.log('\n▶ Creating .vercel/output…');
 if (existsSync(VERCEL_OUT)) rmSync(VERCEL_OUT, { recursive: true });
 mkdirSync(path.join(VERCEL_OUT, 'static'), { recursive: true });
-mkdirSync(path.join(VERCEL_OUT, 'functions', 'api', 'removebg.func'), { recursive: true });
 
 // ── 3. Copy static assets ─────────────────────────────────────────────────
 cpSync(VITE_OUT, path.join(VERCEL_OUT, 'static'), { recursive: true });
 console.log(`  ✓ Copied static assets from ${path.relative(ROOT, VITE_OUT)}`);
 
-// ── 4. Set up /api/removebg serverless function ───────────────────────────
-// The handler source uses ESM (`export default`). Vercel's Node runtime
-// treats a plain `.js` file as CommonJS unless told otherwise, which makes
-// `export default` a syntax error at load time. Use `.mjs` so it's
-// unambiguously loaded as an ES module.
-const funcDir = path.join(VERCEL_OUT, 'functions', 'api', 'removebg.func');
-cpSync(path.join(ROOT, 'api', 'removebg.js'), path.join(funcDir, 'index.mjs'));
-writeFileSync(path.join(funcDir, '.vc-config.json'), JSON.stringify({
-  runtime: 'nodejs20.x',
-  handler: 'index.mjs',
-  launcherType: 'Nodejs',
-  shouldAddHelpers: true,
-}));
-console.log('  ✓ Serverless function: /api/removebg');
-
-// ── 5. Write config.json (routes + headers) ───────────────────────────────
+// ── 4. Write config.json (routes + headers) ───────────────────────────────
 writeFileSync(path.join(VERCEL_OUT, 'config.json'), JSON.stringify({
   version: 3,
   routes: [
-    // API function
-    { src: '^/api/removebg$', dest: '/api/removebg' },
     // Cache static assets (hashed filenames)
     {
       src: '^/assets/(.+)$',
       headers: { 'Cache-Control': 'public, max-age=31536000, immutable' },
       continue: true,
     },
-    // SPA fallback — everything else → index.html
+    // SPA fallback — everything except /api/* → index.html.
+    // /api/removebg is left unmatched here so Vercel's auto-built
+    // function (from api/removebg.js) handles it directly.
     { src: '^/((?!api/).*)$', dest: '/index.html' },
   ],
 }, null, 2));
