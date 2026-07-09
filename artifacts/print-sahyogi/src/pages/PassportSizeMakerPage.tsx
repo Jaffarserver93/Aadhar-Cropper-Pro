@@ -131,6 +131,8 @@ async function makePassportCanvas(_file: File, bgBlob: Blob): Promise<HTMLCanvas
     const canvas = document.createElement('canvas');
     canvas.width = PHOTO_W; canvas.height = PHOTO_H;
     const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, PHOTO_W, PHOTO_H);
     ctx.drawImage(bgBmp, cropX, cropY, cropW, cropH, BORDER, BORDER, PHOTO_W - 2 * BORDER, PHOTO_H - 2 * BORDER);
     ctx.fillStyle = '#000000';
@@ -146,6 +148,8 @@ function buildA4Canvas(entries: { canvas: HTMLCanvasElement; copies: number; bri
   const a4 = document.createElement('canvas');
   a4.width = A4_W; a4.height = A4_H;
   const ctx = a4.getContext('2d')!;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, A4_W, A4_H);
   let rowIdx = 0;
   for (const { canvas, copies, brightness } of entries) {
@@ -181,6 +185,8 @@ function canvasFromDataUrl(dataUrl: string): Promise<HTMLCanvasElement> {
       const c = document.createElement('canvas');
       c.width = PHOTO_W; c.height = PHOTO_H;
       const ctx = c.getContext('2d')!;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
       ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, PHOTO_W, PHOTO_H);
       ctx.drawImage(img, 0, 0, PHOTO_W, PHOTO_H);
       resolve(c);
