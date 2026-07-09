@@ -29,14 +29,14 @@ const MAX_ROWS = _max; // 6
 // ── 0.5 mm border at 300 DPI ─────────────────────────────────────────────────
 const BORDER = Math.round(300 / 25.4 * 0.5); // ≈ 6 px
 
-// ── remove.bg proxy ──────────────────────────────────────────────────────────
+// ── PicWish HD background removal proxy ────────────────────────────────────
 async function removeBg(file: File, signal: AbortSignal): Promise<Blob> {
   const form = new FormData();
   form.append('image_file', file);
   const res = await fetch('/api/removebg', { method: 'POST', body: form, signal });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    if (res.status === 402) throw new Error('remove.bg quota exhausted — try again later.');
+    if (res.status === 402) throw new Error('Background removal quota exhausted — try again later.');
     if (res.status === 429) throw new Error('Too many requests — wait a moment and retry.');
     if (res.status === 503) throw new Error('Background removal not configured.');
     throw new Error(body.error || `Server error ${res.status}`);

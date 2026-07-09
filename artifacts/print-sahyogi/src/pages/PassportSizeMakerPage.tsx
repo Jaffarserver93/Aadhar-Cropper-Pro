@@ -26,14 +26,14 @@ let _max = 0;
 while ((_max + 1) * PHOTO_H + _max * ROW_GAP <= A4_H - MARGIN_T - MARGIN_B) _max++;
 const MAX_ROWS = _max; // 6
 
-// ── remove.bg proxy ──────────────────────────────────────────────────────────
+// ── PicWish HD background removal proxy ────────────────────────────────────
 async function removeBg(file: File, signal: AbortSignal): Promise<Blob> {
   const form = new FormData();
   form.append('image_file', file);
   const res = await fetch('/api/removebg', { method: 'POST', body: form, signal });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    if (res.status === 402) throw new Error('remove.bg quota exhausted — try again later.');
+    if (res.status === 402) throw new Error('Background removal quota exhausted — try again later.');
     if (res.status === 429) throw new Error('Too many requests — wait a moment and retry.');
     throw new Error(body.error || `Server error ${res.status}`);
   }
@@ -369,7 +369,7 @@ export default function PassportSizeMakerPage() {
                 <span className="text-sm font-semibold text-primary">AI White Background</span>
                 <span className="text-xs text-gray-400 mt-0.5">
                   {useWhiteBg
-                    ? 'ON — remove.bg removes background (uses API credit)'
+                    ? 'ON — AI removes background in HD (uses API credit)'
                     : 'OFF — original photo cropped as-is (no credit used)'}
                 </span>
               </div>

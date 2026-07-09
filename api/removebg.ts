@@ -42,7 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const rawBody = Buffer.concat(chunks);
 
   try {
-    const createRes = await fetch(`${PICWISH_TASK_URL}?sync=0&type=hd`, {
+    const createRes = await fetch(`${PICWISH_TASK_URL}?sync=0&output_type=1`, {
       method: 'POST',
       headers: {
         'X-API-KEY': apiKey,

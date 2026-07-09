@@ -17,7 +17,7 @@ async function createPicwishTask(apiKey: string, file: Express.Multer.File): Pro
     file.originalname || "photo.jpg",
   );
   form.append("sync", "0");
-  form.append("type", "hd");
+  form.append("output_type", "1");
 
   const res = await fetch(PICWISH_TASK_URL, {
     method: "POST",
