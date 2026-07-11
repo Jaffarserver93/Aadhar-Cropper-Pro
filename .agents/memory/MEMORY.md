@@ -1,0 +1,2 @@
+- [Artifact registration workarounds](artifact-registration.md) — createArtifact fails on existing dirs; api/design kind artifacts can auto-register from on-disk artifact.toml once stray `.replit-artifact` duplicates are removed.
+- [print-sahyogi auth: Supabase built-in Auth only](print-sahyogi-supabase-auth.md) — user explicitly rejected custom app_users/service-role auth; use supabase.auth (anon key only), no Replit DB/Auth.

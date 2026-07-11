@@ -5,10 +5,6 @@ version = "1.0.0"
 id = "artifacts/print-sahyogi"
 router = "path"
 
-[[integratedSkills]]
-name = "react-vite"
-version = "1.0.0"
-
 [[services]]
 name = "web"
 paths = [ "/" ]
@@ -19,9 +15,13 @@ run = "pnpm --filter @workspace/print-sahyogi run dev"
 
 [services.production]
 build = [ "pnpm", "--filter", "@workspace/print-sahyogi", "run", "build" ]
-publicDir = "artifacts/print-sahyogi/dist/public"
 serve = "static"
+publicDir = "artifacts/print-sahyogi/dist/public"
 
 [[services.production.rewrites]]
 from = "/*"
 to = "/index.html"
+
+[services.env]
+PORT = "18207"
+BASE_PATH = "/"

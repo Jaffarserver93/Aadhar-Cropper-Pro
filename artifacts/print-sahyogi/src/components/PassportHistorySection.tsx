@@ -32,8 +32,7 @@ export function PassportHistorySection() {
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {sessions.map(session => {
-            const totalCopies = session.photos.reduce((s, p) => s + p.copies, 0);
-            const firstPhoto = session.photos[0];
+            const allPhotos = session.rows.flatMap(r => r.slots);
             const date = new Date(session.createdAt).toLocaleDateString('en-IN', {
               day: 'numeric', month: 'short',
             });
@@ -44,7 +43,7 @@ export function PassportHistorySection() {
                 className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden hover:shadow-md hover:border-primary/30 transition-all text-left group"
               >
                 <div className="p-2.5 bg-gray-50 flex gap-1.5">
-                  {session.photos.slice(0, 2).map((p, i) => (
+                  {allPhotos.slice(0, 2).map((p, i) => (
                     <div key={i} className="flex-1 rounded-md overflow-hidden border border-gray-200" style={{ aspectRatio: '35/45', background: '#fff' }}>
                       <img
                         src={p.dataUrl} alt=""
@@ -53,16 +52,16 @@ export function PassportHistorySection() {
                       />
                     </div>
                   ))}
-                  {session.photos.length > 2 && (
+                  {allPhotos.length > 2 && (
                     <div className="flex-1 rounded-md border border-gray-200 bg-gray-100 flex items-center justify-center text-[10px] text-gray-400 font-semibold" style={{ aspectRatio: '35/45' }}>
-                      +{session.photos.length - 2}
+                      +{allPhotos.length - 2}
                     </div>
                   )}
                 </div>
                 <div className="px-3 py-2.5">
                   <p className="text-xs text-gray-400">{date}</p>
                   <p className="text-sm font-semibold text-primary mt-0.5 group-hover:text-accent transition-colors">
-                    {totalCopies * 5} copies
+                    {allPhotos.length} photo{allPhotos.length !== 1 ? 's' : ''}
                   </p>
                 </div>
               </button>

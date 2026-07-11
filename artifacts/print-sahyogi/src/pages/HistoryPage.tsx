@@ -73,7 +73,7 @@ export default function HistoryPage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {sessions.map(session => {
-                const totalCopies = session.photos.reduce((s, p) => s + p.copies, 0);
+                const allPhotos = session.rows.flatMap(r => r.slots);
                 const date = new Date(session.createdAt).toLocaleDateString('en-IN', {
                   day: 'numeric', month: 'short', year: 'numeric',
                 });
@@ -83,7 +83,7 @@ export default function HistoryPage() {
                 return (
                   <div key={session.id} className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
                     <div className="p-3 bg-gray-50 flex gap-2">
-                      {session.photos.slice(0, 3).map((p, i) => (
+                      {allPhotos.slice(0, 3).map((p, i) => (
                         <div key={i} className="flex-1 rounded-lg overflow-hidden border border-gray-200" style={{ aspectRatio: '35/45', background: '#fff' }}>
                           <img
                             src={p.dataUrl} alt=""
@@ -92,9 +92,9 @@ export default function HistoryPage() {
                           />
                         </div>
                       ))}
-                      {session.photos.length > 3 && (
+                      {allPhotos.length > 3 && (
                         <div className="flex-1 rounded-lg border border-gray-200 bg-gray-100 flex items-center justify-center text-xs text-gray-400 font-semibold" style={{ aspectRatio: '35/45' }}>
-                          +{session.photos.length - 3}
+                          +{allPhotos.length - 3}
                         </div>
                       )}
                     </div>
@@ -103,7 +103,7 @@ export default function HistoryPage() {
                       <div className="min-w-0">
                         <p className="text-xs text-gray-400">{date} · {time}</p>
                         <p className="text-sm font-semibold text-primary mt-0.5 truncate">
-                          {session.photos.length} photo{session.photos.length !== 1 ? 's' : ''} · {totalCopies * 5} copies
+                          {session.rows.length} row{session.rows.length !== 1 ? 's' : ''} · {allPhotos.length} photo{allPhotos.length !== 1 ? 's' : ''}
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">

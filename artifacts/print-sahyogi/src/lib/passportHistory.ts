@@ -6,13 +6,16 @@ export interface HistoryPhoto {
   brightness: number;
   saturation: number;
   sharpness: number;
-  copies: number;
+}
+
+export interface HistoryRow {
+  slots: HistoryPhoto[]; // 1–5 independent photos in one physical row
 }
 
 export interface HistorySession {
   id: string;
   createdAt: string;
-  photos: HistoryPhoto[];
+  rows: HistoryRow[];
 }
 
 export function getAllSessions(): HistorySession[] {

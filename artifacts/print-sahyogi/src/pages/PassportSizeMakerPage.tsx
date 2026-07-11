@@ -1,13 +1,13 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  UploadCloud, Download, AlertCircle, CheckCircle2, X, Loader2, Plus, Minus, ImageIcon, ArrowLeft, Sun, Droplets, SlidersHorizontal,
+  UploadCloud, Download, AlertCircle, CheckCircle2, X, Loader2, Plus, ArrowLeft, Sun, Droplets, SlidersHorizontal,
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
 import { useLocation } from 'wouter';
-import { getSession, upsertSession } from '@/lib/passportHistory';
+import { getSession, upsertSession, type HistoryRow } from '@/lib/passportHistory';
 
 // ── Layout — exact 35×45 mm at 300 DPI ──────────────────────────────────────
 const A4_W     = 2480;
@@ -16,7 +16,7 @@ const MARGIN_T = 90;
 const MARGIN_B = 90;
 const H_GAP    = 10;
 const ROW_GAP  = 24;
-const PER_ROW  = 5;
+const PER_ROW  = 5; // max photos in a single physical row
 const PHOTO_W  = Math.round(35 * 300 / 25.4);   // 413 px = 35 mm
 const PHOTO_H  = Math.round(45 * 300 / 25.4);   // 531 px = 45 mm
 const MARGIN_L = Math.round((A4_W - PER_ROW * PHOTO_W - (PER_ROW - 1) * H_GAP) / 2);
@@ -24,7 +24,7 @@ const BORDER   = Math.round(300 / 25.4 * 0.5);  // 0.5 mm border ≈ 6 px
 
 let _max = 0;
 while ((_max + 1) * PHOTO_H + _max * ROW_GAP <= A4_H - MARGIN_T - MARGIN_B) _max++;
-const MAX_ROWS = _max; // 6
+const MAX_ROWS = _max; // 6 — max physical rows on one A4 sheet
 
 // ── PicWish HD background removal proxy ────────────────────────────────────
 async function removeBg(file: File, signal: AbortSignal): Promise<Blob> {
@@ -152,32 +152,37 @@ function buildFilterString(brightness: number, saturation: number, sharpness: nu
   return parts.length ? parts.join(' ') : 'none';
 }
 
-function buildA4Canvas(entries: { canvas: HTMLCanvasElement; copies: number; brightness: number; saturation: number; sharpness: number }[]): HTMLCanvasElement {
+interface RenderSlot {
+  canvas: HTMLCanvasElement;
+  brightness: number;
+  saturation: number;
+  sharpness: number;
+}
+
+function buildA4Canvas(rows: { slots: RenderSlot[] }[]): HTMLCanvasElement {
   const a4 = document.createElement('canvas');
   a4.width = A4_W; a4.height = A4_H;
   const ctx = a4.getContext('2d')!;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, A4_W, A4_H);
-  let rowIdx = 0;
-  for (const { canvas, copies, brightness, saturation, sharpness } of entries) {
-    ctx.filter = buildFilterString(brightness, saturation, sharpness);
-    for (let c = 0; c < copies; c++) {
-      const y = MARGIN_T + rowIdx * (PHOTO_H + ROW_GAP);
-      for (let col = 0; col < PER_ROW; col++)
-        ctx.drawImage(canvas, MARGIN_L + col * (PHOTO_W + H_GAP), y, PHOTO_W, PHOTO_H);
-      rowIdx++;
-    }
-  }
+  rows.forEach((row, rowIdx) => {
+    const y = MARGIN_T + rowIdx * (PHOTO_H + ROW_GAP);
+    row.slots.forEach((slot, col) => {
+      if (col >= PER_ROW) return;
+      ctx.filter = buildFilterString(slot.brightness, slot.saturation, slot.sharpness);
+      ctx.drawImage(slot.canvas, MARGIN_L + col * (PHOTO_W + H_GAP), y, PHOTO_W, PHOTO_H);
+    });
+  });
   ctx.filter = 'none';
   return a4;
 }
 
-function downloadPdf(entries: { canvas: HTMLCanvasElement; copies: number; brightness: number; saturation: number; sharpness: number }[], totalRows: number) {
-  const imgData = buildA4Canvas(entries).toDataURL('image/png');
+function downloadPdf(rows: { slots: RenderSlot[] }[], totalPhotos: number) {
+  const imgData = buildA4Canvas(rows).toDataURL('image/png');
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: false });
   pdf.addImage(imgData, 'PNG', 0, 0, 210, 297, undefined, 'NONE');
-  pdf.save(`passport-photos-${totalRows}rows-${totalRows * PER_ROW}copies.pdf`);
+  pdf.save(`passport-photos-${rows.length}rows-${totalPhotos}photos.pdf`);
 }
 
 function friendlyError(err: unknown): string {
@@ -203,30 +208,40 @@ function canvasFromDataUrl(dataUrl: string): Promise<HTMLCanvasElement> {
   });
 }
 
-interface PhotoRow {
+interface PhotoSlot {
   id: string;
   status: 'processing' | 'done' | 'error';
   canvas: HTMLCanvasElement | null;
   dataUrl: string | null;
   error: string | null;
-  copies: number;
   brightness: number;
   saturation: number;
   sharpness: number;
 }
 
+interface RowGroup {
+  id: string;
+  slots: PhotoSlot[]; // 1–5 independent photos rendered side by side in one physical row
+}
+
+const newSlot = (): PhotoSlot => ({
+  id: crypto.randomUUID(), status: 'processing', canvas: null, dataUrl: null, error: null,
+  brightness: 100, saturation: 100, sharpness: 100,
+});
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function PassportSizeMakerPage() {
-  const [rows,        setRows]        = useState<PhotoRow[]>([]);
+  const [rows,        setRows]        = useState<RowGroup[]>([]);
   const [a4DataUrl,   setA4DataUrl]   = useState<string | null>(null);
   const [isDragging,  setIsDragging]  = useState(false);
   const [useWhiteBg,  setUseWhiteBg]  = useState(true);
   const [location, navigate] = useLocation();
 
-  const addFileRef   = useRef<HTMLInputElement>(null);
-  const retryFileRef = useRef<HTMLInputElement>(null);
-  const abortMap     = useRef<Map<string, AbortController>>(new Map());
-  const restoredRef  = useRef(false);
+  const newRowFileRef  = useRef<HTMLInputElement>(null);
+  const addSlotFileRef = useRef<HTMLInputElement>(null);
+  const retryFileRef   = useRef<HTMLInputElement>(null);
+  const abortMap        = useRef<Map<string, AbortController>>(new Map());
+  const restoredRef     = useRef(false);
 
   // Extract session ID from URL: /passport-size-maker/{id}
   const sessionId = (() => {
@@ -234,15 +249,19 @@ export default function PassportSizeMakerPage() {
     return m?.[1] ?? null;
   })();
 
-  const totalCopies = rows.reduce((s, r) => s + r.copies, 0);
-  const canAdd      = totalCopies < MAX_ROWS;
-  const doneRows    = rows.filter(r => r.status === 'done');
+  const allSlots    = rows.flatMap(r => r.slots);
+  const totalPhotos = allSlots.length;
+  const doneSlots    = allSlots.filter(s => s.status === 'done');
+  const canAddRow    = rows.length < MAX_ROWS;
 
   // Rebuild A4 preview whenever rows change
   useEffect(() => {
-    const entries = rows.filter(r => r.status === 'done' && r.canvas).map(r => ({ canvas: r.canvas!, copies: r.copies, brightness: r.brightness, saturation: r.saturation, sharpness: r.sharpness }));
-    if (!entries.length) { setA4DataUrl(null); return; }
-    setA4DataUrl(buildA4Canvas(entries).toDataURL('image/png'));
+    const renderRows = rows.map(r => ({
+      slots: r.slots.filter(s => s.status === 'done' && s.canvas)
+        .map(s => ({ canvas: s.canvas!, brightness: s.brightness, saturation: s.saturation, sharpness: s.sharpness })),
+    }));
+    if (!renderRows.some(r => r.slots.length)) { setA4DataUrl(null); return; }
+    setA4DataUrl(buildA4Canvas(renderRows).toDataURL('image/png'));
   }, [rows]);
 
   // If no session ID in URL, redirect to a new UUID session
@@ -257,41 +276,48 @@ export default function PassportSizeMakerPage() {
     if (!sessionId || restoredRef.current) return;
     restoredRef.current = true;
     const session = getSession(sessionId);
-    if (!session?.photos.length) return;
+    if (!session?.rows?.length) return;
     Promise.all(
-      session.photos.map(async p => {
-        const canvas = await canvasFromDataUrl(p.dataUrl);
-        return { id: crypto.randomUUID(), status: 'done' as const, canvas, dataUrl: p.dataUrl, error: null, copies: p.copies, brightness: p.brightness ?? 100, saturation: p.saturation ?? 100, sharpness: p.sharpness ?? 100 };
-      })
+      session.rows.map(async (row): Promise<RowGroup> => ({
+        id: crypto.randomUUID(),
+        slots: await Promise.all(row.slots.map(async (p): Promise<PhotoSlot> => ({
+          id: crypto.randomUUID(), status: 'done', canvas: await canvasFromDataUrl(p.dataUrl), dataUrl: p.dataUrl, error: null,
+          brightness: p.brightness ?? 100, saturation: p.saturation ?? 100, sharpness: p.sharpness ?? 100,
+        }))),
+      })),
     ).then(restored => setRows(restored));
   }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-save to localStorage whenever done rows change
+  // Auto-save to localStorage whenever done slots change
   useEffect(() => {
-    if (!sessionId || doneRows.length === 0) return;
+    if (!sessionId || doneSlots.length === 0) return;
     const existing = getSession(sessionId);
+    const rowsForSave: HistoryRow[] = rows
+      .map(r => ({
+        slots: r.slots.filter(s => s.status === 'done' && s.dataUrl)
+          .map(s => ({ dataUrl: s.dataUrl!, brightness: s.brightness, saturation: s.saturation, sharpness: s.sharpness })),
+      }))
+      .filter(r => r.slots.length > 0);
+    if (!rowsForSave.length) return;
     upsertSession({
       id: sessionId,
       createdAt: existing?.createdAt ?? new Date().toISOString(),
-      photos: doneRows.map(r => ({ dataUrl: r.dataUrl!, brightness: r.brightness, saturation: r.saturation, sharpness: r.sharpness, copies: r.copies })),
+      rows: rowsForSave,
     });
-  }, [doneRows, sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [rows, sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => abortMap.current.forEach(c => c.abort()), []);
 
-  const processFile = useCallback(async (file: File, rowId?: string, whiteBgOverride?: boolean) => {
+  const processFile = useCallback(async (file: File, rowId: string, slotId: string, whiteBgOverride?: boolean) => {
     if (!file.type.startsWith('image/')) return;
-    const id = rowId ?? crypto.randomUUID();
-    abortMap.current.get(id)?.abort();
+    abortMap.current.get(slotId)?.abort();
     const ctrl = new AbortController();
-    abortMap.current.set(id, ctrl);
+    abortMap.current.set(slotId, ctrl);
 
-    const processing: PhotoRow = { id, status: 'processing', canvas: null, dataUrl: null, error: null, copies: 1, brightness: 100, saturation: 100, sharpness: 100 };
-    setRows(prev => {
-      const idx = prev.findIndex(r => r.id === id);
-      if (idx >= 0) { const n = [...prev]; n[idx] = { ...n[idx], ...processing, copies: n[idx].copies, brightness: n[idx].brightness, saturation: n[idx].saturation, sharpness: n[idx].sharpness }; return n; }
-      return [...prev, processing];
-    });
+    setRows(prev => prev.map(r => {
+      if (r.id !== rowId) return r;
+      return { ...r, slots: r.slots.map(s => s.id === slotId ? { ...s, status: 'processing', error: null } : s) };
+    }));
 
     try {
       // When whiteBg is ON → call remove.bg; when OFF → use original file (saves credits)
@@ -302,40 +328,75 @@ export default function PassportSizeMakerPage() {
       if (ctrl.signal.aborted) return;
       const canvas = await makePassportCanvas(file, bgBlob);
       if (ctrl.signal.aborted) return;
-      const done: PhotoRow = { id, status: 'done', canvas, dataUrl: canvas.toDataURL('image/png'), error: null, copies: 1, brightness: 100, saturation: 100, sharpness: 100 };
-      setRows(prev => prev.map(r => r.id === id ? { ...done, copies: r.copies, brightness: r.brightness, saturation: r.saturation, sharpness: r.sharpness } : r));
+      const dataUrl = canvas.toDataURL('image/png');
+      setRows(prev => prev.map(r => {
+        if (r.id !== rowId) return r;
+        return { ...r, slots: r.slots.map(s => s.id === slotId ? { ...s, status: 'done', canvas, dataUrl, error: null } : s) };
+      }));
     } catch (err) {
       if ((err as DOMException)?.name === 'AbortError') return;
-      const error: PhotoRow = { id, status: 'error', canvas: null, dataUrl: null, error: friendlyError(err), copies: 1, brightness: 100, saturation: 100, sharpness: 100 };
-      setRows(prev => prev.map(r => r.id === id ? { ...error, copies: r.copies, brightness: r.brightness, saturation: r.saturation, sharpness: r.sharpness } : r));
-    } finally { abortMap.current.delete(id); }
+      const error = friendlyError(err);
+      setRows(prev => prev.map(r => {
+        if (r.id !== rowId) return r;
+        return { ...r, slots: r.slots.map(s => s.id === slotId ? { ...s, status: 'error', canvas: null, error } : s) };
+      }));
+    } finally { abortMap.current.delete(slotId); }
   }, [useWhiteBg]);
 
-  const removeRow = (id: string) => { abortMap.current.get(id)?.abort(); setRows(prev => prev.filter(r => r.id !== id)); };
-  const retryRow  = (id: string) => { retryFileRef.current?.setAttribute('data-row-id', id); retryFileRef.current?.click(); };
-
-  const setCopies = (id: string, delta: number) => {
-    setRows(prev => prev.map(r => {
-      if (r.id !== id) return r;
-      const others = prev.filter(x => x.id !== id).reduce((s, x) => s + x.copies, 0);
-      return { ...r, copies: Math.min(MAX_ROWS - others, Math.max(1, r.copies + delta)) };
-    }));
+  // Start a brand-new physical row from an uploaded file (first photo in that row)
+  const addNewRow = (file: File) => {
+    if (!canAddRow) return;
+    const slot = newSlot();
+    const rowId = crypto.randomUUID();
+    setRows(prev => [...prev, { id: rowId, slots: [slot] }]);
+    processFile(file, rowId, slot.id);
   };
 
-  const setBrightness  = (id: string, value: number) =>
-    setRows(prev => prev.map(r => r.id === id ? { ...r, brightness: value } : r));
-  const setSaturation  = (id: string, value: number) =>
-    setRows(prev => prev.map(r => r.id === id ? { ...r, saturation: value } : r));
-  const setSharpness   = (id: string, value: number) =>
-    setRows(prev => prev.map(r => r.id === id ? { ...r, sharpness: value } : r));
+  // Add another (independent) photo into an existing row — up to 5 per row
+  const addSlotToRow = (rowId: string, file: File) => {
+    const row = rows.find(r => r.id === rowId);
+    if (!row || row.slots.length >= PER_ROW) return;
+    const slot = newSlot();
+    setRows(prev => prev.map(r => r.id === rowId ? { ...r, slots: [...r.slots, slot] } : r));
+    processFile(file, rowId, slot.id);
+  };
+
+  const removeSlot = (rowId: string, slotId: string) => {
+    abortMap.current.get(slotId)?.abort();
+    setRows(prev => prev
+      .map(r => r.id === rowId ? { ...r, slots: r.slots.filter(s => s.id !== slotId) } : r)
+      .filter(r => r.slots.length > 0));
+  };
+
+  const removeRow = (rowId: string) => {
+    const row = rows.find(r => r.id === rowId);
+    row?.slots.forEach(s => abortMap.current.get(s.id)?.abort());
+    setRows(prev => prev.filter(r => r.id !== rowId));
+  };
+
+  const retrySlot = (rowId: string, slotId: string) => {
+    if (retryFileRef.current) {
+      retryFileRef.current.setAttribute('data-row-id', rowId);
+      retryFileRef.current.setAttribute('data-slot-id', slotId);
+      retryFileRef.current.click();
+    }
+  };
+
+  const setSlotProp = (rowId: string, slotId: string, patch: Partial<Pick<PhotoSlot, 'brightness' | 'saturation' | 'sharpness'>>) =>
+    setRows(prev => prev.map(r => r.id !== rowId ? r : {
+      ...r, slots: r.slots.map(s => s.id === slotId ? { ...s, ...patch } : s),
+    }));
 
   const onDragOver  = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
   const onDragLeave = () => setIsDragging(false);
-  const onDrop      = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files[0]; if (f && canAdd) processFile(f); };
+  const onDrop      = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files[0]; if (f && canAddRow) addNewRow(f); };
 
   const handleDownload = () => {
-    const entries = rows.filter(r => r.canvas).map(r => ({ canvas: r.canvas!, copies: r.copies, brightness: r.brightness, saturation: r.saturation, sharpness: r.sharpness }));
-    if (entries.length) downloadPdf(entries, totalCopies);
+    const renderRows = rows.map(r => ({
+      slots: r.slots.filter(s => s.canvas)
+        .map(s => ({ canvas: s.canvas!, brightness: s.brightness, saturation: s.saturation, sharpness: s.sharpness })),
+    })).filter(r => r.slots.length > 0);
+    if (renderRows.length) downloadPdf(renderRows, totalPhotos);
   };
 
   return (
@@ -364,8 +425,8 @@ export default function PassportSizeMakerPage() {
             Passport Size Photo Maker
           </h1>
           <p className="text-gray-500 mt-1 text-sm sm:text-base">
-            Upload a photo — we remove the background, crop your face to exact <strong>35×45 mm</strong> Indian passport standard,
-            and arrange up to <strong>{MAX_ROWS * PER_ROW} copies</strong> on an A4 sheet. All inside your browser.
+            Upload photos — we remove backgrounds and crop faces to exact <strong>35×45 mm</strong> Indian passport standard.
+            Choose 1–5 photos per row and mix different people freely, across up to <strong>{MAX_ROWS} rows</strong> on one A4 sheet.
           </p>
         </div>
       </div>
@@ -404,8 +465,8 @@ export default function PassportSizeMakerPage() {
               <div
                 role="button" tabIndex={0}
                 onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
-                onClick={() => addFileRef.current?.click()}
-                onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && addFileRef.current?.click()}
+                onClick={() => newRowFileRef.current?.click()}
+                onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && newRowFileRef.current?.click()}
                 aria-label="Upload photo — click or press Enter to browse"
                 className={`border-2 border-dashed rounded-2xl p-10 sm:p-14 flex flex-col items-center gap-4 cursor-pointer transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
                   ${isDragging ? 'border-accent bg-accent/5' : 'border-gray-200 hover:border-accent/50 hover:bg-gray-50'}`}
@@ -419,7 +480,7 @@ export default function PassportSizeMakerPage() {
                   <p className="text-sm text-gray-400 mt-1">JPG · PNG · WEBP — front-facing, well-lit</p>
                 </div>
                 <button
-                  onClick={e => { e.stopPropagation(); addFileRef.current?.click(); }}
+                  onClick={e => { e.stopPropagation(); newRowFileRef.current?.click(); }}
                   className="mt-1 bg-primary text-white text-sm font-semibold px-6 py-2.5 rounded-full shadow-sm hover:bg-primary/90 transition-all"
                 >
                   Choose Photo
@@ -427,178 +488,173 @@ export default function PassportSizeMakerPage() {
               </div>
             )}
 
-            {/* Row cards */}
+            {/* Row groups */}
             <AnimatePresence initial={false}>
-              {rows.map((row, idx) => {
-                const othersTotal = rows.filter(r => r.id !== row.id).reduce((s, r) => s + r.copies, 0);
-                const canInc = othersTotal + row.copies < MAX_ROWS;
-                const canDec = row.copies > 1;
-                return (
-                  <motion.div key={row.id}
-                    initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -8, scale: 0.97 }} transition={{ duration: 0.2 }}
-                    className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden"
-                  >
-                    {/* Card header */}
-                    <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 bg-gray-50/60">
-                      <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
-                        {idx + 1}
-                      </div>
-                      <span className="text-sm font-semibold text-primary flex-1">
-                        Photo {idx + 1}
-                        {row.status === 'done' && (
-                          <span className="ml-2 text-xs font-normal text-gray-400">{row.copies} row{row.copies !== 1 ? 's' : ''} · {row.copies * PER_ROW} copies</span>
-                        )}
-                      </span>
-                      <button onClick={() => removeRow(row.id)} aria-label={`Remove photo ${idx + 1}`}
-                        className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-red-50 flex items-center justify-center text-gray-400 hover:text-red-400 transition-colors">
-                        <X className="w-3.5 h-3.5" />
-                      </button>
+              {rows.map((row, rowIdx) => (
+                <motion.div key={row.id}
+                  initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8, scale: 0.97 }} transition={{ duration: 0.2 }}
+                  className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden"
+                >
+                  {/* Row header */}
+                  <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 bg-gray-50/60">
+                    <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+                      {rowIdx + 1}
+                    </div>
+                    <span className="text-sm font-semibold text-primary flex-1">
+                      Row {rowIdx + 1}
+                      <span className="ml-2 text-xs font-normal text-gray-400">{row.slots.length}/{PER_ROW} photos in this row</span>
+                    </span>
+                    <button onClick={() => removeRow(row.id)} aria-label={`Remove row ${rowIdx + 1}`}
+                      className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-red-50 flex items-center justify-center text-gray-400 hover:text-red-400 transition-colors">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Slot tiles — up to 5 independent photos side by side */}
+                  <div className="px-4 py-4 flex flex-col gap-4">
+                    <div className="grid grid-cols-5 gap-2">
+                      {Array.from({ length: PER_ROW }, (_, col) => {
+                        const slot = row.slots[col];
+                        if (!slot) {
+                          const isNextOpenSlot = col === row.slots.length;
+                          return (
+                            <button
+                              key={col}
+                              disabled={!isNextOpenSlot}
+                              onClick={() => {
+                                if (!isNextOpenSlot) return;
+                                addSlotFileRef.current?.setAttribute('data-row-id', row.id);
+                                addSlotFileRef.current?.click();
+                              }}
+                              aria-label="Add another photo to this row"
+                              className={`rounded-lg border-2 border-dashed flex items-center justify-center transition-all
+                                ${isNextOpenSlot ? 'border-gray-200 hover:border-accent/60 hover:bg-accent/5 text-gray-300 hover:text-accent cursor-pointer' : 'border-gray-100 text-gray-100 cursor-not-allowed'}`}
+                              style={{ aspectRatio: '35/45' }}
+                            >
+                              <Plus className="w-5 h-5" />
+                            </button>
+                          );
+                        }
+                        return (
+                          <div key={slot.id} className="relative rounded-lg overflow-hidden border border-gray-200 shadow-sm group" style={{ aspectRatio: '35/45', background: '#fff' }}>
+                            {slot.status === 'processing' && (
+                              <div className="w-full h-full flex items-center justify-center bg-gray-50">
+                                <Loader2 className="w-5 h-5 animate-spin text-accent" />
+                              </div>
+                            )}
+                            {slot.status === 'error' && (
+                              <button onClick={() => retrySlot(row.id, slot.id)}
+                                className="w-full h-full flex flex-col items-center justify-center gap-1 bg-red-50 text-red-400 text-[10px] font-medium px-1 text-center">
+                                <AlertCircle className="w-4 h-4" />
+                                Retry
+                              </button>
+                            )}
+                            {slot.status === 'done' && slot.dataUrl && (
+                              <img
+                                src={slot.dataUrl} alt=""
+                                className="w-full h-full object-cover block"
+                                style={{ background: '#fff', filter: buildFilterString(slot.brightness, slot.saturation, slot.sharpness) === 'none' ? undefined : buildFilterString(slot.brightness, slot.saturation, slot.sharpness) }}
+                              />
+                            )}
+                            <button
+                              onClick={() => removeSlot(row.id, slot.id)}
+                              aria-label="Remove this photo"
+                              className="absolute top-1 right-1 w-5 h-5 rounded-md bg-black/50 hover:bg-red-500 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
 
-                    {/* Card body */}
-                    <div className="px-4 py-4 flex flex-col gap-4">
-                      {/* Processing */}
-                      {row.status === 'processing' && (
-                        <div className="flex items-center gap-3 text-gray-500 text-sm py-2">
-                          <Loader2 className="w-5 h-5 animate-spin text-accent shrink-0" />
-                          <span>Removing background &amp; cropping face…</span>
-                        </div>
-                      )}
+                    {row.slots.length < PER_ROW && (
+                      <button
+                        onClick={() => { addSlotFileRef.current?.setAttribute('data-row-id', row.id); addSlotFileRef.current?.click(); }}
+                        className="flex items-center justify-center gap-2 py-2 rounded-xl border-2 border-dashed border-gray-200 hover:border-accent/60 hover:bg-accent/5 text-gray-400 hover:text-accent text-xs font-medium transition-all"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Add another photo to this row ({row.slots.length}/{PER_ROW})
+                      </button>
+                    )}
 
-                      {/* Done */}
-                      {row.status === 'done' && row.dataUrl && (
-                        <>
-                          {/* 5 thumbnails */}
-                          <div className="flex gap-2 overflow-hidden">
-                            {Array.from({ length: PER_ROW }, (_, i) => (
-                              <div key={i}
-                                className="flex-1 rounded-lg overflow-hidden border border-gray-200 shadow-sm"
-                                style={{ aspectRatio: '35/45', background: '#fff' }}>
-                                <img
-                                  src={row.dataUrl!} alt=""
-                                  className="w-full h-full object-cover block"
-                                  style={{ background: '#fff', filter: buildFilterString(row.brightness, row.saturation, row.sharpness) === 'none' ? undefined : buildFilterString(row.brightness, row.saturation, row.sharpness) }}
-                                />
-                              </div>
-                            ))}
-                          </div>
-
-                          {/* Brightness slider */}
-                          <div className="flex items-center gap-3">
-                            <Sun className="w-4 h-4 text-gray-400 shrink-0" />
-                            <input
-                              type="range" min={50} max={160} step={1}
-                              value={row.brightness}
-                              onChange={e => setBrightness(row.id, Number(e.target.value))}
-                              className="flex-1 h-1.5 rounded-full accent-primary cursor-pointer"
-                            />
-                            <button
-                              onClick={() => setBrightness(row.id, 100)}
-                              className="text-[11px] text-gray-400 hover:text-primary transition-colors w-8 text-right shrink-0"
-                            >
-                              {row.brightness}%
-                            </button>
-                          </div>
-
-                          {/* Saturation slider */}
-                          <div className="flex items-center gap-3">
-                            <Droplets className="w-4 h-4 text-gray-400 shrink-0" />
-                            <input
-                              type="range" min={0} max={200} step={1}
-                              value={row.saturation}
-                              onChange={e => setSaturation(row.id, Number(e.target.value))}
-                              className="flex-1 h-1.5 rounded-full accent-primary cursor-pointer"
-                            />
-                            <button
-                              onClick={() => setSaturation(row.id, 100)}
-                              className="text-[11px] text-gray-400 hover:text-primary transition-colors w-8 text-right shrink-0"
-                            >
-                              {row.saturation}%
-                            </button>
-                          </div>
-
-                          {/* Sharpness slider */}
-                          <div className="flex items-center gap-3">
-                            <SlidersHorizontal className="w-4 h-4 text-gray-400 shrink-0" />
-                            <input
-                              type="range" min={90} max={140} step={1}
-                              value={row.sharpness}
-                              onChange={e => setSharpness(row.id, Number(e.target.value))}
-                              className="flex-1 h-1.5 rounded-full accent-primary cursor-pointer"
-                            />
-                            <button
-                              onClick={() => setSharpness(row.id, 100)}
-                              className="text-[11px] text-gray-400 hover:text-primary transition-colors w-8 text-right shrink-0"
-                            >
-                              {row.sharpness}%
-                            </button>
-                          </div>
-
-                          {/* Copies counter */}
-                          <div className="flex items-center gap-3">
-                            <button
-                              onClick={() => setCopies(row.id, -1)} disabled={!canDec}
-                              className="w-10 h-10 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 active:scale-95 flex items-center justify-center text-primary disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-sm"
-                            >
-                              <Minus className="w-4 h-4" />
-                            </button>
-
-                            <div className="flex-1 max-w-[180px] bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 text-center select-none">
-                              <motion.p key={row.copies} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
-                                className="text-xl font-bold text-primary">
-                                {row.copies}
-                              </motion.p>
-                              <p className="text-[11px] text-gray-400 mt-0.5">
-                                {row.copies === 1 ? 'row' : 'rows'} · {row.copies * PER_ROW} photos
-                              </p>
-                            </div>
-
-                            <button
-                              onClick={() => setCopies(row.id, +1)} disabled={!canInc}
-                              className="w-10 h-10 rounded-xl bg-primary hover:bg-primary/90 active:scale-95 flex items-center justify-center text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-sm"
-                            >
-                              <Plus className="w-4 h-4" />
-                            </button>
-
-                            <div className="flex items-center gap-1.5">
-                              <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
-                              <span className="text-xs text-gray-400">{totalCopies}/{MAX_ROWS} rows</span>
-                            </div>
-                          </div>
-                        </>
-                      )}
-
-                      {/* Error */}
-                      {row.status === 'error' && (
-                        <div className="flex items-center gap-2 text-sm text-red-500 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
-                          <AlertCircle className="w-4 h-4 shrink-0" />
-                          <span className="flex-1 truncate">{row.error}</span>
-                          <button onClick={() => retryRow(row.id)}
-                            className="shrink-0 text-xs font-medium text-primary hover:underline">
-                            Retry
+                    {/* Per-photo adjustment controls */}
+                    {row.slots.filter(s => s.status === 'done').map((slot, i) => (
+                      <div key={slot.id} className="flex flex-col gap-2 pt-3 border-t border-gray-100 first:border-t-0 first:pt-0">
+                        <p className="text-[11px] font-semibold text-gray-400">Photo {i + 1} adjustments</p>
+                        <div className="flex items-center gap-3">
+                          <Sun className="w-4 h-4 text-gray-400 shrink-0" />
+                          <input
+                            type="range" min={50} max={160} step={1}
+                            value={slot.brightness}
+                            onChange={e => setSlotProp(row.id, slot.id, { brightness: Number(e.target.value) })}
+                            className="flex-1 h-1.5 rounded-full accent-primary cursor-pointer"
+                          />
+                          <button
+                            onClick={() => setSlotProp(row.id, slot.id, { brightness: 100 })}
+                            className="text-[11px] text-gray-400 hover:text-primary transition-colors w-8 text-right shrink-0"
+                          >
+                            {slot.brightness}%
                           </button>
                         </div>
-                      )}
-                    </div>
-                  </motion.div>
-                );
-              })}
+                        <div className="flex items-center gap-3">
+                          <Droplets className="w-4 h-4 text-gray-400 shrink-0" />
+                          <input
+                            type="range" min={0} max={200} step={1}
+                            value={slot.saturation}
+                            onChange={e => setSlotProp(row.id, slot.id, { saturation: Number(e.target.value) })}
+                            className="flex-1 h-1.5 rounded-full accent-primary cursor-pointer"
+                          />
+                          <button
+                            onClick={() => setSlotProp(row.id, slot.id, { saturation: 100 })}
+                            className="text-[11px] text-gray-400 hover:text-primary transition-colors w-8 text-right shrink-0"
+                          >
+                            {slot.saturation}%
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <SlidersHorizontal className="w-4 h-4 text-gray-400 shrink-0" />
+                          <input
+                            type="range" min={90} max={140} step={1}
+                            value={slot.sharpness}
+                            onChange={e => setSlotProp(row.id, slot.id, { sharpness: Number(e.target.value) })}
+                            className="flex-1 h-1.5 rounded-full accent-primary cursor-pointer"
+                          />
+                          <button
+                            onClick={() => setSlotProp(row.id, slot.id, { sharpness: 100 })}
+                            className="text-[11px] text-gray-400 hover:text-primary transition-colors w-8 text-right shrink-0"
+                          >
+                            {slot.sharpness}%
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+
+                    {row.slots.some(s => s.status === 'done') && (
+                      <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                        <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
+                        {row.slots.filter(s => s.status === 'done').length}/{row.slots.length} photos ready in this row
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              ))}
             </AnimatePresence>
 
-            {/* Add row */}
+            {/* Add new row */}
             {rows.length > 0 && (
               <div>
-                {canAdd ? (
-                  <button onClick={() => addFileRef.current?.click()}
+                {canAddRow ? (
+                  <button onClick={() => newRowFileRef.current?.click()}
                     className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed border-gray-200 hover:border-accent/60 hover:bg-accent/5 text-gray-400 hover:text-accent text-sm font-medium transition-all">
                     <Plus className="w-4 h-4" />
-                    Add photo {rows.length + 1} — different person
-                    <span className="text-gray-300 text-xs">({totalCopies}/{MAX_ROWS} rows used)</span>
+                    Add row {rows.length + 1}
+                    <span className="text-gray-300 text-xs">({rows.length}/{MAX_ROWS} rows used)</span>
                   </button>
                 ) : (
                   <p className="text-center text-xs text-gray-400 py-2">
-                    A4 sheet full — {MAX_ROWS} rows / {MAX_ROWS * PER_ROW} photos maximum
+                    A4 sheet full — {MAX_ROWS} rows / up to {MAX_ROWS * PER_ROW} photos maximum
                   </p>
                 )}
               </div>
@@ -606,7 +662,7 @@ export default function PassportSizeMakerPage() {
           </div>
 
           {/* ── Right: A4 Preview ── */}
-          {(doneRows.length > 0 || rows.some(r => r.status === 'processing')) && (
+          {(doneSlots.length > 0 || rows.some(r => r.slots.some(s => s.status === 'processing'))) && (
             <motion.div
               initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
               className="w-full lg:w-64 xl:w-72 shrink-0 flex flex-col gap-4"
@@ -616,7 +672,7 @@ export default function PassportSizeMakerPage() {
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-semibold text-primary">A4 Preview</p>
                   <p className="text-[11px] text-gray-400">
-                    {doneRows.length}/{rows.length} ready
+                    {doneSlots.length}/{totalPhotos} ready
                   </p>
                 </div>
 
@@ -636,14 +692,14 @@ export default function PassportSizeMakerPage() {
 
               {/* Download button */}
               <button
-                onClick={handleDownload} disabled={doneRows.length === 0}
+                onClick={handleDownload} disabled={doneSlots.length === 0}
                 className="flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-bold bg-primary text-white hover:bg-primary/90 shadow-md transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Download className="w-4 h-4" />
                 Download A4 PDF
               </button>
               <p className="text-[10px] text-gray-400 text-center -mt-2">
-                {totalCopies} row{totalCopies !== 1 ? 's' : ''} · {totalCopies * PER_ROW} photos · Print at 100%
+                {rows.length} row{rows.length !== 1 ? 's' : ''} · {totalPhotos} photo{totalPhotos !== 1 ? 's' : ''} · Print at 100%
               </p>
             </motion.div>
           )}
@@ -658,7 +714,7 @@ export default function PassportSizeMakerPage() {
             {[
               { n: '1', t: 'Upload', d: 'Select a clear, front-facing photo in JPG, PNG or WEBP format.' },
               { n: '2', t: 'Auto-process', d: 'We remove the background and crop your face to passport standard.' },
-              { n: '3', t: 'Set copies', d: 'Use − and + to choose how many rows (5 photos each) you need.' },
+              { n: '3', t: 'Build rows', d: 'Choose 1–5 photos per row — mix different people and add more anytime.' },
               { n: '4', t: 'Download', d: 'Get a 300 DPI lossless A4 PDF, ready to print and cut.' },
             ].map(s => (
               <div key={s.n} className="bg-white border border-gray-100 rounded-xl p-4 text-center shadow-sm">
@@ -674,8 +730,23 @@ export default function PassportSizeMakerPage() {
       <Footer />
 
       {/* Hidden file inputs */}
-      <input ref={addFileRef}   type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) processFile(f); e.target.value = ''; }} />
-      <input ref={retryFileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={e => { const f = e.target.files?.[0]; const id = retryFileRef.current?.getAttribute('data-row-id'); if (f && id) processFile(f, id); e.target.value = ''; }} />
+      <input ref={newRowFileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) addNewRow(f); e.target.value = ''; }} />
+      <input ref={addSlotFileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+        onChange={e => {
+          const f = e.target.files?.[0];
+          const rowId = addSlotFileRef.current?.getAttribute('data-row-id');
+          if (f && rowId) addSlotToRow(rowId, f);
+          e.target.value = '';
+        }} />
+      <input ref={retryFileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+        onChange={e => {
+          const f = e.target.files?.[0];
+          const rowId = retryFileRef.current?.getAttribute('data-row-id');
+          const slotId = retryFileRef.current?.getAttribute('data-slot-id');
+          if (f && rowId && slotId) processFile(f, rowId, slotId);
+          e.target.value = '';
+        }} />
     </div>
   );
 }

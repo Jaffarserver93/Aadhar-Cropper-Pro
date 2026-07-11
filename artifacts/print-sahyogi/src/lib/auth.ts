@@ -1,6 +1,5 @@
 import { supabase } from './supabase';
-
-const AUTH_KEY = 'ezone_auth';
+import type { Session, User } from '@supabase/supabase-js';
 
 export interface AppUser {
   id: string;
@@ -8,99 +7,75 @@ export interface AppUser {
   role: 'user' | 'admin';
 }
 
-// ── Browser-compatible SHA-256 ─────────────────────────────────────────────────
-async function sha256(message: string): Promise<string> {
-  const buf = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(message),
-  );
-  return Array.from(new Uint8Array(buf))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
+// Supabase Auth requires an email internally, but this app is username-only.
+// We synthesize a stable, non-routable email from the username so users
+// never see or enter an email address anywhere in the UI.
+const EMAIL_DOMAIN = 'users.ezone-helper.local';
+function usernameToEmail(username: string): string {
+  return `${username.trim().toLowerCase()}@${EMAIL_DOMAIN}`;
 }
 
-// ── Storage ───────────────────────────────────────────────────────────────────
-export function getStoredUser(): AppUser | null {
-  try {
-    const raw = localStorage.getItem(AUTH_KEY);
-    return raw ? (JSON.parse(raw) as AppUser) : null;
-  } catch {
-    return null;
-  }
-}
-export function storeUser(user: AppUser) {
-  localStorage.setItem(AUTH_KEY, JSON.stringify(user));
-}
-export function clearStoredUser() {
-  localStorage.removeItem(AUTH_KEY);
+function toAppUser(user: User | null | undefined): AppUser | null {
+  if (!user) return null;
+  const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
+  return {
+    id: user.id,
+    username: (meta.username as string) ?? (user.email?.split('@')[0] ?? 'user'),
+    role: (meta.role as 'user' | 'admin') ?? 'user',
+  };
 }
 
-// ── Auth actions ──────────────────────────────────────────────────────────────
-export async function customSignIn(
+export function sessionToUser(session: Session | null): AppUser | null {
+  return toAppUser(session?.user);
+}
+
+// ── Auth actions (Supabase built-in Auth, username-only UX) ────────────────
+export async function signInWithPassword(
   username: string,
   password: string,
 ): Promise<{ user: AppUser | null; error: string | null }> {
-  try {
-    const clean = username.trim().toLowerCase();
-    const hash = await sha256(password);
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: usernameToEmail(username),
+    password,
+  });
 
-    const { data, error } = await supabase
-      .from('app_users')
-      .select('id, username, role')
-      .eq('username', clean)
-      .eq('password_hash', hash)
-      .maybeSingle();
-
-    if (error) return { user: null, error: 'Login failed. Please try again.' };
-    if (!data) return { user: null, error: 'Invalid username or password.' };
-
-    const user: AppUser = { id: data.id, username: data.username, role: data.role };
-    storeUser(user);
-    return { user, error: null };
-  } catch {
-    return { user: null, error: 'Could not connect to database. Please try again.' };
-  }
+  if (error) return { user: null, error: 'Invalid username or password.' };
+  return { user: toAppUser(data.user), error: null };
 }
 
-export async function customRegister(
+export async function signUpWithPassword(
   username: string,
   password: string,
-): Promise<{ user: AppUser | null; error: string | null }> {
-  try {
-    const clean = username.trim().toLowerCase();
-    if (!/^[a-z0-9_]{3,20}$/.test(clean))
-      return { user: null, error: 'Username must be 3–20 characters: letters, numbers, underscores only.' };
-    if (password.length < 6)
-      return { user: null, error: 'Password must be at least 6 characters.' };
-
-    const hash = await sha256(password);
-
-    // Check for existing username
-    const { data: existing } = await supabase
-      .from('app_users')
-      .select('id')
-      .eq('username', clean)
-      .maybeSingle();
-
-    if (existing) return { user: null, error: 'Username already taken. Please choose another.' };
-
-    // Insert new user
-    const { data, error } = await supabase
-      .from('app_users')
-      .insert({ username: clean, password_hash: hash })
-      .select('id, username, role')
-      .single();
-
-    if (error || !data) return { user: null, error: 'Registration failed. Try again.' };
-
-    const user: AppUser = { id: data.id, username: data.username, role: data.role };
-    storeUser(user);
-    return { user, error: null };
-  } catch {
-    return { user: null, error: 'Could not connect to database. Please try again.' };
+): Promise<{ user: AppUser | null; needsEmailConfirmation: boolean; error: string | null }> {
+  const clean = username.trim().toLowerCase();
+  if (!/^[a-z0-9_]{3,20}$/.test(clean)) {
+    return {
+      user: null,
+      needsEmailConfirmation: false,
+      error: 'Username must be 3–20 characters: letters, numbers, underscores only.',
+    };
   }
+
+  const { data, error } = await supabase.auth.signUp({
+    email: usernameToEmail(clean),
+    password,
+    options: {
+      data: { username: clean, role: 'user' },
+    },
+  });
+
+  if (error) {
+    if (error.message.toLowerCase().includes('already registered')) {
+      return { user: null, needsEmailConfirmation: false, error: 'Username already taken. Please choose another.' };
+    }
+    return { user: null, needsEmailConfirmation: false, error: error.message };
+  }
+
+  // If Supabase requires email confirmation, no session is returned yet.
+  const needsEmailConfirmation = !data.session;
+  return { user: toAppUser(data.user), needsEmailConfirmation, error: null };
 }
 
-export function customSignOut() {
-  clearStoredUser();
+export async function signOut() {
+  await supabase.auth.signOut();
 }
