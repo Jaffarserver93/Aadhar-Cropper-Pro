@@ -4,6 +4,8 @@ const MAX_SESSIONS = 8;
 export interface HistoryPhoto {
   dataUrl: string;
   brightness: number;
+  saturation: number;
+  sharpness: number;
   copies: number;
 }
 
