@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useLocation } from 'wouter';
 import { Printer, Eye, EyeOff, Loader2, CheckCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { signUpWithPassword } from '@/lib/auth';
+import { customRegister } from '@/lib/auth';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function Register() {
@@ -16,7 +16,6 @@ export default function Register() {
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
-  const [needsEmailConfirmation, setNeedsEmailConfirmation] = useState(false);
   const [loading, setLoading] = useState(false);
 
   if (user) {
@@ -71,9 +70,8 @@ export default function Register() {
       return;
     }
 
-    // Step 3: Create account via Supabase Auth
-    const { user: newUser, needsEmailConfirmation: needsConfirm, error: regError } =
-      await signUpWithPassword(username, password);
+    // Step 3: Register user in the app_users table
+    const { user: newUser, error: regError } = await customRegister(username, password);
 
     if (regError || !newUser) {
       // Rollback: unmark the code
@@ -94,7 +92,6 @@ export default function Register() {
       .eq('id', codeRow.id);
 
     setLoading(false);
-    setNeedsEmailConfirmation(needsConfirm);
     setSuccess(true);
   };
 
@@ -102,24 +99,11 @@ export default function Register() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center px-4">
         <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 text-center">
-          {needsEmailConfirmation ? (
-            <>
-              <CheckCircle className="h-14 w-14 text-amber-500 mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">Almost there</h2>
-              <p className="text-gray-500 text-sm mb-6">
-                Your account was created. If sign-in doesn't work right away, ask the site
-                owner to confirm your account, then try signing in.
-              </p>
-            </>
-          ) : (
-            <>
-              <CheckCircle className="h-14 w-14 text-green-500 mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">Account Created!</h2>
-              <p className="text-gray-500 text-sm mb-6">
-                You're all set. Go sign in with your username and password.
-              </p>
-            </>
-          )}
+          <CheckCircle className="h-14 w-14 text-green-500 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Account Created!</h2>
+          <p className="text-gray-500 text-sm mb-6">
+            You're all set. Go sign in with your username and password.
+          </p>
           <a
             href="/login"
             className="inline-block bg-primary text-white px-6 py-2.5 rounded-lg font-semibold text-sm hover:bg-primary/90 transition"
