@@ -1,7 +1,7 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  UploadCloud, Download, AlertCircle, CheckCircle2, X, Loader2, Plus, ArrowLeft, Sun, Droplets, SlidersHorizontal,
+  UploadCloud, Download, AlertCircle, CheckCircle2, X, Loader2, Plus, Minus, ArrowLeft, Sun, Droplets, SlidersHorizontal, Copy, Layers,
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Navbar } from '@/components/Navbar';
@@ -217,6 +217,8 @@ interface PhotoSlot {
   brightness: number;
   saturation: number;
   sharpness: number;
+  copiesInRow: number; // how many times this photo repeats within its own row (1–5)
+  totalCopies: number; // total copies of this photo across the whole sheet, 0 = off (5–30 step 5)
 }
 
 interface RowGroup {
@@ -226,8 +228,82 @@ interface RowGroup {
 
 const newSlot = (): PhotoSlot => ({
   id: crypto.randomUUID(), status: 'processing', canvas: null, dataUrl: null, error: null,
-  brightness: 100, saturation: 100, sharpness: 100,
+  brightness: 100, saturation: 100, sharpness: 100, copiesInRow: 1, totalCopies: 0,
 });
+
+// Expand a row's distinct slots into the physical tiles they occupy (1–5),
+// repeating a slot `copiesInRow` times back-to-back, capped to PER_ROW total.
+function expandRowVisual(slots: PhotoSlot[]): PhotoSlot[] {
+  const out: PhotoSlot[] = [];
+  for (const slot of slots) {
+    const copies = slot.status === 'done' ? Math.max(1, Math.min(slot.copiesInRow, PER_ROW)) : 1;
+    for (let i = 0; i < copies && out.length < PER_ROW; i++) out.push(slot);
+  }
+  return out;
+}
+
+// Build the full sheet: expand in-row copies, then append extra full/partial
+// rows (up to MAX_ROWS overall) so any slot with `totalCopies` set reaches
+// that many total instances across the whole A4 sheet.
+function expandSheet(rows: RowGroup[]): RowGroup[] {
+  const stepOne = rows.map(row => ({ ...row, slots: expandRowVisual(row.slots) }));
+
+  const countMap = new Map<string, number>();
+  stepOne.forEach(r => r.slots.forEach(s => countMap.set(s.id, (countMap.get(s.id) ?? 0) + 1)));
+
+  const extraRows: RowGroup[] = [];
+  let totalRowCount = stepOne.length;
+
+  for (const row of rows) {
+    for (const slot of row.slots) {
+      if (slot.status !== 'done' || !slot.totalCopies) continue;
+      let achieved = countMap.get(slot.id) ?? 0;
+      while (achieved < slot.totalCopies && totalRowCount < MAX_ROWS) {
+        const take = Math.min(PER_ROW, slot.totalCopies - achieved);
+        extraRows.push({ id: `auto-${slot.id}-${totalRowCount}`, slots: Array.from({ length: take }, () => slot) });
+        achieved += take;
+        totalRowCount++;
+      }
+      countMap.set(slot.id, achieved);
+    }
+  }
+
+  return [...stepOne, ...extraRows];
+}
+
+// Small inline -/+ stepper used for the copy-count controls.
+function Stepper({
+  value, min, max, step, onChange, format,
+}: {
+  value: number; min: number; max: number; step: number;
+  onChange: (n: number) => void; format?: (n: number) => string;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 shrink-0">
+      <button
+        type="button"
+        onClick={() => onChange(Math.max(min, value - step))}
+        disabled={value <= min}
+        aria-label="Decrease"
+        className="w-7 h-7 rounded-lg border border-gray-200 flex items-center justify-center text-gray-500 hover:border-accent hover:text-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      >
+        <Minus className="w-3.5 h-3.5" />
+      </button>
+      <span className="text-sm font-bold text-primary w-9 text-center tabular-nums">
+        {format ? format(value) : value}
+      </span>
+      <button
+        type="button"
+        onClick={() => onChange(Math.min(max, value + step))}
+        disabled={value >= max}
+        aria-label="Increase"
+        className="w-7 h-7 rounded-lg border border-gray-200 flex items-center justify-center text-gray-500 hover:border-accent hover:text-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      >
+        <Plus className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+}
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function PassportSizeMakerPage() {
@@ -250,19 +326,23 @@ export default function PassportSizeMakerPage() {
   })();
 
   const allSlots    = rows.flatMap(r => r.slots);
-  const totalPhotos = allSlots.length;
   const doneSlots    = allSlots.filter(s => s.status === 'done');
   const canAddRow    = rows.length < MAX_ROWS;
 
-  // Rebuild A4 preview whenever rows change
+  // Expand manual rows into the full printable sheet: in-row copies + any
+  // auto-filled extra rows requested via "total copies on sheet".
+  const sheetRows    = useMemo(() => expandSheet(rows), [rows]);
+  const totalPhotos  = sheetRows.reduce((sum, r) => sum + r.slots.filter(s => s.status === 'done' && s.canvas).length, 0);
+
+  // Rebuild A4 preview whenever the sheet changes
   useEffect(() => {
-    const renderRows = rows.map(r => ({
+    const renderRows = sheetRows.map(r => ({
       slots: r.slots.filter(s => s.status === 'done' && s.canvas)
         .map(s => ({ canvas: s.canvas!, brightness: s.brightness, saturation: s.saturation, sharpness: s.sharpness })),
     }));
     if (!renderRows.some(r => r.slots.length)) { setA4DataUrl(null); return; }
     setA4DataUrl(buildA4Canvas(renderRows).toDataURL('image/png'));
-  }, [rows]);
+  }, [sheetRows]);
 
   // If no session ID in URL, redirect to a new UUID session
   useEffect(() => {
@@ -283,6 +363,7 @@ export default function PassportSizeMakerPage() {
         slots: await Promise.all(row.slots.map(async (p): Promise<PhotoSlot> => ({
           id: crypto.randomUUID(), status: 'done', canvas: await canvasFromDataUrl(p.dataUrl), dataUrl: p.dataUrl, error: null,
           brightness: p.brightness ?? 100, saturation: p.saturation ?? 100, sharpness: p.sharpness ?? 100,
+          copiesInRow: p.copiesInRow ?? 1, totalCopies: p.totalCopies ?? 0,
         }))),
       })),
     ).then(restored => setRows(restored));
@@ -295,7 +376,10 @@ export default function PassportSizeMakerPage() {
     const rowsForSave: HistoryRow[] = rows
       .map(r => ({
         slots: r.slots.filter(s => s.status === 'done' && s.dataUrl)
-          .map(s => ({ dataUrl: s.dataUrl!, brightness: s.brightness, saturation: s.saturation, sharpness: s.sharpness })),
+          .map(s => ({
+            dataUrl: s.dataUrl!, brightness: s.brightness, saturation: s.saturation, sharpness: s.sharpness,
+            copiesInRow: s.copiesInRow, totalCopies: s.totalCopies,
+          })),
       }))
       .filter(r => r.slots.length > 0);
     if (!rowsForSave.length) return;
@@ -352,10 +436,10 @@ export default function PassportSizeMakerPage() {
     processFile(file, rowId, slot.id);
   };
 
-  // Add another (independent) photo into an existing row — up to 5 per row
+  // Add another (independent) photo into an existing row — up to 5 physical slots per row
   const addSlotToRow = (rowId: string, file: File) => {
     const row = rows.find(r => r.id === rowId);
-    if (!row || row.slots.length >= PER_ROW) return;
+    if (!row || expandRowVisual(row.slots).length >= PER_ROW) return;
     const slot = newSlot();
     setRows(prev => prev.map(r => r.id === rowId ? { ...r, slots: [...r.slots, slot] } : r));
     processFile(file, rowId, slot.id);
@@ -366,6 +450,14 @@ export default function PassportSizeMakerPage() {
     setRows(prev => prev
       .map(r => r.id === rowId ? { ...r, slots: r.slots.filter(s => s.id !== slotId) } : r)
       .filter(r => r.slots.length > 0));
+  };
+
+  // Clicking the X on a *duplicate* tile (a repeated copy within its row)
+  // just removes one copy instead of deleting the whole photo.
+  const decrementRowCopy = (rowId: string, slotId: string) => {
+    setRows(prev => prev.map(r => r.id !== rowId ? r : {
+      ...r, slots: r.slots.map(s => s.id === slotId ? { ...s, copiesInRow: Math.max(1, s.copiesInRow - 1) } : s),
+    }));
   };
 
   const removeRow = (rowId: string) => {
@@ -382,17 +474,37 @@ export default function PassportSizeMakerPage() {
     }
   };
 
-  const setSlotProp = (rowId: string, slotId: string, patch: Partial<Pick<PhotoSlot, 'brightness' | 'saturation' | 'sharpness'>>) =>
+  const setSlotProp = (rowId: string, slotId: string, patch: Partial<Pick<PhotoSlot, 'brightness' | 'saturation' | 'sharpness' | 'totalCopies'>>) =>
     setRows(prev => prev.map(r => r.id !== rowId ? r : {
       ...r, slots: r.slots.map(s => s.id === slotId ? { ...s, ...patch } : s),
     }));
+
+  // "Copies in this row" — repeats a photo within its own row, capped so the
+  // row never exceeds PER_ROW physical slots shared with its other photos.
+  const setCopiesInRow = (rowId: string, slotId: string, next: number) => {
+    setRows(prev => prev.map(r => {
+      if (r.id !== rowId) return r;
+      const others = r.slots.filter(s => s.id !== slotId)
+        .reduce((sum, s) => sum + Math.max(1, Math.min(s.copiesInRow, PER_ROW)), 0);
+      const max = Math.max(1, PER_ROW - others);
+      const clamped = Math.max(1, Math.min(next, max));
+      return { ...r, slots: r.slots.map(s => s.id === slotId ? { ...s, copiesInRow: clamped } : s) };
+    }));
+  };
+
+  // "Total copies on sheet" — auto-fills extra rows elsewhere on the sheet
+  // so this specific photo reaches the requested total (0 = off, 5–30 step 5).
+  const setTotalCopies = (rowId: string, slotId: string, next: number) => {
+    const clamped = Math.max(0, Math.min(MAX_ROWS * PER_ROW, Math.round(next / 5) * 5));
+    setSlotProp(rowId, slotId, { totalCopies: clamped });
+  };
 
   const onDragOver  = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
   const onDragLeave = () => setIsDragging(false);
   const onDrop      = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files[0]; if (f && canAddRow) addNewRow(f); };
 
   const handleDownload = () => {
-    const renderRows = rows.map(r => ({
+    const renderRows = sheetRows.map(r => ({
       slots: r.slots.filter(s => s.canvas)
         .map(s => ({ canvas: s.canvas!, brightness: s.brightness, saturation: s.saturation, sharpness: s.sharpness })),
     })).filter(r => r.slots.length > 0);
@@ -503,7 +615,7 @@ export default function PassportSizeMakerPage() {
                     </div>
                     <span className="text-sm font-semibold text-primary flex-1">
                       Row {rowIdx + 1}
-                      <span className="ml-2 text-xs font-normal text-gray-400">{row.slots.length}/{PER_ROW} photos in this row</span>
+                      <span className="ml-2 text-xs font-normal text-gray-400">{expandRowVisual(row.slots).length}/{PER_ROW} slots filled in this row</span>
                     </span>
                     <button onClick={() => removeRow(row.id)} aria-label={`Remove row ${rowIdx + 1}`}
                       className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-red-50 flex items-center justify-center text-gray-400 hover:text-red-400 transition-colors">
@@ -511,78 +623,109 @@ export default function PassportSizeMakerPage() {
                     </button>
                   </div>
 
-                  {/* Slot tiles — up to 5 independent photos side by side */}
+                  {/* Slot tiles — up to 5 physical slots side by side; a photo with
+                      "copies in this row" > 1 fills consecutive slots with itself */}
                   <div className="px-4 py-4 flex flex-col gap-4">
-                    <div className="grid grid-cols-5 gap-2">
-                      {Array.from({ length: PER_ROW }, (_, col) => {
-                        const slot = row.slots[col];
-                        if (!slot) {
-                          const isNextOpenSlot = col === row.slots.length;
-                          return (
-                            <button
-                              key={col}
-                              disabled={!isNextOpenSlot}
-                              onClick={() => {
-                                if (!isNextOpenSlot) return;
-                                addSlotFileRef.current?.setAttribute('data-row-id', row.id);
-                                addSlotFileRef.current?.click();
-                              }}
-                              aria-label="Add another photo to this row"
-                              className={`rounded-lg border-2 border-dashed flex items-center justify-center transition-all
-                                ${isNextOpenSlot ? 'border-gray-200 hover:border-accent/60 hover:bg-accent/5 text-gray-300 hover:text-accent cursor-pointer' : 'border-gray-100 text-gray-100 cursor-not-allowed'}`}
-                              style={{ aspectRatio: '35/45' }}
-                            >
-                              <Plus className="w-5 h-5" />
-                            </button>
-                          );
-                        }
-                        return (
-                          <div key={slot.id} className="relative rounded-lg overflow-hidden border border-gray-200 shadow-sm group" style={{ aspectRatio: '35/45', background: '#fff' }}>
-                            {slot.status === 'processing' && (
-                              <div className="w-full h-full flex items-center justify-center bg-gray-50">
-                                <Loader2 className="w-5 h-5 animate-spin text-accent" />
+                    {(() => {
+                      const visual = expandRowVisual(row.slots);
+                      const firstOccurrence = new Map<string, number>();
+                      visual.forEach((s, idx) => { if (!firstOccurrence.has(s.id)) firstOccurrence.set(s.id, idx); });
+                      return (
+                        <div className="grid grid-cols-5 gap-2">
+                          {Array.from({ length: PER_ROW }, (_, col) => {
+                            const slot = visual[col];
+                            if (!slot) {
+                              const isNextOpenSlot = col === visual.length;
+                              return (
+                                <button
+                                  key={col}
+                                  disabled={!isNextOpenSlot}
+                                  onClick={() => {
+                                    if (!isNextOpenSlot) return;
+                                    addSlotFileRef.current?.setAttribute('data-row-id', row.id);
+                                    addSlotFileRef.current?.click();
+                                  }}
+                                  aria-label="Add another photo to this row"
+                                  className={`rounded-lg border-2 border-dashed flex items-center justify-center transition-all
+                                    ${isNextOpenSlot ? 'border-gray-200 hover:border-accent/60 hover:bg-accent/5 text-gray-300 hover:text-accent cursor-pointer' : 'border-gray-100 text-gray-100 cursor-not-allowed'}`}
+                                  style={{ aspectRatio: '35/45' }}
+                                >
+                                  <Plus className="w-5 h-5" />
+                                </button>
+                              );
+                            }
+                            const isDuplicateTile = firstOccurrence.get(slot.id) !== col;
+                            return (
+                              <div key={`${slot.id}-${col}`} className="relative rounded-lg overflow-hidden border border-gray-200 shadow-sm group" style={{ aspectRatio: '35/45', background: '#fff' }}>
+                                {slot.status === 'processing' && (
+                                  <div className="w-full h-full flex items-center justify-center bg-gray-50">
+                                    <Loader2 className="w-5 h-5 animate-spin text-accent" />
+                                  </div>
+                                )}
+                                {slot.status === 'error' && (
+                                  <button onClick={() => retrySlot(row.id, slot.id)}
+                                    className="w-full h-full flex flex-col items-center justify-center gap-1 bg-red-50 text-red-400 text-[10px] font-medium px-1 text-center">
+                                    <AlertCircle className="w-4 h-4" />
+                                    Retry
+                                  </button>
+                                )}
+                                {slot.status === 'done' && slot.dataUrl && (
+                                  <img
+                                    src={slot.dataUrl} alt=""
+                                    className="w-full h-full object-cover block"
+                                    style={{ background: '#fff', filter: buildFilterString(slot.brightness, slot.saturation, slot.sharpness) === 'none' ? undefined : buildFilterString(slot.brightness, slot.saturation, slot.sharpness) }}
+                                  />
+                                )}
+                                {isDuplicateTile && (
+                                  <span className="absolute bottom-1 left-1 bg-black/50 text-white text-[9px] font-semibold px-1.5 py-0.5 rounded-md">
+                                    copy
+                                  </span>
+                                )}
+                                <button
+                                  onClick={() => isDuplicateTile ? decrementRowCopy(row.id, slot.id) : removeSlot(row.id, slot.id)}
+                                  aria-label={isDuplicateTile ? 'Remove this copy' : 'Remove this photo'}
+                                  className="absolute top-1 right-1 w-5 h-5 rounded-md bg-black/50 hover:bg-red-500 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
                               </div>
-                            )}
-                            {slot.status === 'error' && (
-                              <button onClick={() => retrySlot(row.id, slot.id)}
-                                className="w-full h-full flex flex-col items-center justify-center gap-1 bg-red-50 text-red-400 text-[10px] font-medium px-1 text-center">
-                                <AlertCircle className="w-4 h-4" />
-                                Retry
-                              </button>
-                            )}
-                            {slot.status === 'done' && slot.dataUrl && (
-                              <img
-                                src={slot.dataUrl} alt=""
-                                className="w-full h-full object-cover block"
-                                style={{ background: '#fff', filter: buildFilterString(slot.brightness, slot.saturation, slot.sharpness) === 'none' ? undefined : buildFilterString(slot.brightness, slot.saturation, slot.sharpness) }}
-                              />
-                            )}
-                            <button
-                              onClick={() => removeSlot(row.id, slot.id)}
-                              aria-label="Remove this photo"
-                              className="absolute top-1 right-1 w-5 h-5 rounded-md bg-black/50 hover:bg-red-500 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
 
-                    {row.slots.length < PER_ROW && (
+                    {expandRowVisual(row.slots).length < PER_ROW && (
                       <button
                         onClick={() => { addSlotFileRef.current?.setAttribute('data-row-id', row.id); addSlotFileRef.current?.click(); }}
                         className="flex items-center justify-center gap-2 py-2 rounded-xl border-2 border-dashed border-gray-200 hover:border-accent/60 hover:bg-accent/5 text-gray-400 hover:text-accent text-xs font-medium transition-all"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        Add another photo to this row ({row.slots.length}/{PER_ROW})
+                        Add another photo to this row ({expandRowVisual(row.slots).length}/{PER_ROW})
                       </button>
                     )}
 
                     {/* Per-photo adjustment controls */}
-                    {row.slots.filter(s => s.status === 'done').map((slot, i) => (
-                      <div key={slot.id} className="flex flex-col gap-2 pt-3 border-t border-gray-100 first:border-t-0 first:pt-0">
+                    {row.slots.filter(s => s.status === 'done').map((slot, i) => {
+                      const rowMax = Math.max(1, PER_ROW - row.slots.filter(s => s.id !== slot.id)
+                        .reduce((sum, s) => sum + Math.max(1, Math.min(s.copiesInRow, PER_ROW)), 0));
+                      return (
+                      <div key={slot.id} className="flex flex-col gap-3 pt-3 border-t border-gray-100 first:border-t-0 first:pt-0">
                         <p className="text-[11px] font-semibold text-gray-400">Photo {i + 1} adjustments</p>
+
+                        {/* Copies within this row */}
+                        <div className="flex items-center justify-between gap-3 bg-gray-50 rounded-xl px-3 py-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Copy className="w-4 h-4 text-gray-400 shrink-0" />
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-primary">Copies in this row</p>
+                              <p className="text-[10px] text-gray-400">Repeat this photo in Row {rowIdx + 1} (max {rowMax})</p>
+                            </div>
+                          </div>
+                          <Stepper value={slot.copiesInRow} min={1} max={rowMax} step={1}
+                            onChange={n => setCopiesInRow(row.id, slot.id, n)} />
+                        </div>
+
                         <div className="flex items-center gap-3">
                           <Sun className="w-4 h-4 text-gray-400 shrink-0" />
                           <input
@@ -628,8 +771,25 @@ export default function PassportSizeMakerPage() {
                             {slot.sharpness}%
                           </button>
                         </div>
+
+                        {/* Total copies across the whole sheet */}
+                        <div className="flex items-center justify-between gap-3 bg-gray-50 rounded-xl px-3 py-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Layers className="w-4 h-4 text-gray-400 shrink-0" />
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-primary">Total copies on sheet</p>
+                              <p className="text-[10px] text-gray-400">
+                                {slot.totalCopies > 0 ? `Auto-fills extra rows to reach ${slot.totalCopies} total` : 'Off — uses only this row'}
+                              </p>
+                            </div>
+                          </div>
+                          <Stepper value={slot.totalCopies} min={0} max={MAX_ROWS * PER_ROW} step={5}
+                            onChange={n => setTotalCopies(row.id, slot.id, n)}
+                            format={n => n === 0 ? 'Off' : String(n)} />
+                        </div>
                       </div>
-                    ))}
+                      );
+                    })}
 
                     {row.slots.some(s => s.status === 'done') && (
                       <div className="flex items-center gap-1.5 text-xs text-gray-400">
