@@ -5,58 +5,7 @@ import { logger } from "../lib/logger";
 const router: IRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 12 * 1024 * 1024 } });
 
-const PICWISH_TASK_URL = "https://techhk.aoscdn.com/api/tasks/visual/segmentation";
-const POLL_INTERVAL_MS = 1000;
-const POLL_TIMEOUT_MS = 30_000;
-
-async function createPicwishTask(apiKey: string, file: Express.Multer.File): Promise<string> {
-  const form = new FormData();
-  form.append(
-    "image_file",
-    new Blob([new Uint8Array(file.buffer)], { type: file.mimetype }),
-    file.originalname || "photo.jpg",
-  );
-  form.append("sync", "0");
-  form.append("output_type", "1");
-
-  const res = await fetch(PICWISH_TASK_URL, {
-    method: "POST",
-    headers: { "X-API-KEY": apiKey },
-    body: form,
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw Object.assign(new Error(`PicWish: ${text}`), { status: res.status });
-  }
-
-  const json: any = await res.json();
-  const taskId = json?.data?.task_id;
-  if (!taskId) {
-    throw Object.assign(new Error(json?.message || "PicWish: no task_id returned."), { status: 502 });
-  }
-  return taskId;
-}
-
-async function pollPicwishTask(apiKey: string, taskId: string): Promise<string> {
-  const deadline = Date.now() + POLL_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-    const res = await fetch(`${PICWISH_TASK_URL}/${taskId}`, {
-      headers: { "X-API-KEY": apiKey },
-    });
-    if (!res.ok) continue;
-    const json: any = await res.json();
-    const state = json?.data?.state;
-    if (state === 1 && json?.data?.image) {
-      return json.data.image;
-    }
-    if (state === -1) {
-      throw Object.assign(new Error(json?.data?.error || "PicWish processing failed."), { status: 502 });
-    }
-  }
-  throw Object.assign(new Error("PicWish: processing timed out."), { status: 504 });
-}
+const REMOVEBG_URL = "https://api.remove.bg/v1.0/removebg";
 
 router.post("/removebg", upload.single("image_file"), async (req, res) => {
   const apiKey = process.env["REMOVEBG_API_KEY"];
@@ -71,23 +20,38 @@ router.post("/removebg", upload.single("image_file"), async (req, res) => {
   }
 
   try {
-    const taskId = await createPicwishTask(apiKey, req.file);
-    const resultUrl = await pollPicwishTask(apiKey, taskId);
+    const form = new FormData();
+    form.append(
+      "image_file",
+      new Blob([new Uint8Array(req.file.buffer)], { type: req.file.mimetype }),
+      req.file.originalname || "photo.jpg",
+    );
+    form.append("size", "auto");
 
-    const resultImage = await fetch(resultUrl);
-    if (!resultImage.ok) {
-      res.status(502).json({ error: "Could not download processed image." });
+    const rbRes = await fetch(REMOVEBG_URL, {
+      method: "POST",
+      headers: { "X-Api-Key": apiKey },
+      body: form,
+    });
+
+    if (!rbRes.ok) {
+      let message = `remove.bg request failed (${rbRes.status}).`;
+      try {
+        const json: any = await rbRes.json();
+        message = json?.errors?.[0]?.title || message;
+      } catch { /* response wasn't JSON */ }
+      const status = rbRes.status === 402 ? 402 : rbRes.status === 429 ? 429 : rbRes.status === 403 ? 401 : 502;
+      res.status(status).json({ error: message });
       return;
     }
 
-    const pngBuffer = Buffer.from(await resultImage.arrayBuffer());
+    const pngBuffer = Buffer.from(await rbRes.arrayBuffer());
     res.set("Content-Type", "image/png");
     res.set("Cache-Control", "private, no-store");
     res.send(pngBuffer);
   } catch (err: any) {
-    logger.error({ err }, "PicWish proxy error");
-    const status = err?.status === 402 ? 402 : err?.status === 429 ? 429 : err?.status === 504 ? 504 : 502;
-    res.status(status).json({ error: err?.message || "Could not reach background removal service." });
+    logger.error({ err }, "remove.bg proxy error");
+    res.status(502).json({ error: err?.message || "Could not reach background removal service." });
   }
 });
 
