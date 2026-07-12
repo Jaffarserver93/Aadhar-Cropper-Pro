@@ -242,31 +242,32 @@ function expandRowVisual(slots: PhotoSlot[]): PhotoSlot[] {
   return out;
 }
 
-// Build the full sheet: expand in-row copies, then append extra full/partial
-// rows (up to MAX_ROWS overall) so any slot with `totalCopies` set reaches
-// that many total instances across the whole A4 sheet.
+// Build the full sheet: expand in-row copies, then append whole duplicate
+// rows (same photo mix, same order) so any row with a `totalCopies` target
+// set on one of its photos reaches that many total tiles for that row,
+// up to MAX_ROWS overall — e.g. a row of "3 men + 2 women" with a total of
+// 10 becomes that same 5-photo row repeated twice, not a separate row of
+// just one person.
 function expandSheet(rows: RowGroup[]): RowGroup[] {
   const stepOne = rows.map(row => ({ ...row, slots: expandRowVisual(row.slots) }));
-
-  const countMap = new Map<string, number>();
-  stepOne.forEach(r => r.slots.forEach(s => countMap.set(s.id, (countMap.get(s.id) ?? 0) + 1)));
-
   const extraRows: RowGroup[] = [];
   let totalRowCount = stepOne.length;
 
-  for (const row of rows) {
-    for (const slot of row.slots) {
-      if (slot.status !== 'done' || !slot.totalCopies) continue;
-      let achieved = countMap.get(slot.id) ?? 0;
-      while (achieved < slot.totalCopies && totalRowCount < MAX_ROWS) {
-        const take = Math.min(PER_ROW, slot.totalCopies - achieved);
-        extraRows.push({ id: `auto-${slot.id}-${totalRowCount}`, slots: Array.from({ length: take }, () => slot) });
-        achieved += take;
-        totalRowCount++;
-      }
-      countMap.set(slot.id, achieved);
+  rows.forEach((row, idx) => {
+    const visual = stepOne[idx].slots;
+    if (visual.length === 0) return;
+    const target = Math.max(0, ...row.slots.map(s => (s.status === 'done' ? s.totalCopies : 0)));
+    if (!target) return;
+
+    let achieved = visual.length;
+    let dupIndex = 0;
+    while (achieved < target && totalRowCount < MAX_ROWS) {
+      extraRows.push({ id: `auto-${row.id}-${dupIndex}`, slots: visual });
+      achieved += visual.length;
+      totalRowCount++;
+      dupIndex++;
     }
-  }
+  });
 
   return [...stepOne, ...extraRows];
 }
@@ -779,7 +780,7 @@ export default function PassportSizeMakerPage() {
                             <div className="min-w-0">
                               <p className="text-xs font-semibold text-primary">Total copies on sheet</p>
                               <p className="text-[10px] text-gray-400">
-                                {slot.totalCopies > 0 ? `Auto-fills extra rows to reach ${slot.totalCopies} total` : 'Off — uses only this row'}
+                                {slot.totalCopies > 0 ? `Repeats this whole row further down until Row ${rowIdx + 1} totals ${slot.totalCopies}` : 'Off — uses only this row'}
                               </p>
                             </div>
                           </div>
