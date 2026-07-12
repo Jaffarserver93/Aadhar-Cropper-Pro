@@ -218,17 +218,17 @@ interface PhotoSlot {
   saturation: number;
   sharpness: number;
   copiesInRow: number; // how many times this photo repeats within its own row (1–5)
-  totalCopies: number; // total copies of this photo across the whole sheet, 0 = off (5–30 step 5)
 }
 
 interface RowGroup {
   id: string;
   slots: PhotoSlot[]; // 1–5 independent photos rendered side by side in one physical row
+  totalCopies: number; // total copies of this whole row across the sheet, 0 = off (5–30 step 5)
 }
 
 const newSlot = (): PhotoSlot => ({
   id: crypto.randomUUID(), status: 'processing', canvas: null, dataUrl: null, error: null,
-  brightness: 100, saturation: 100, sharpness: 100, copiesInRow: 1, totalCopies: 0,
+  brightness: 100, saturation: 100, sharpness: 100, copiesInRow: 1,
 });
 
 // Expand a row's distinct slots into the physical tiles they occupy (1–5),
@@ -256,13 +256,13 @@ function expandSheet(rows: RowGroup[]): RowGroup[] {
   rows.forEach((row, idx) => {
     const visual = stepOne[idx].slots;
     if (visual.length === 0) return;
-    const target = Math.max(0, ...row.slots.map(s => (s.status === 'done' ? s.totalCopies : 0)));
+    const target = row.totalCopies;
     if (!target) return;
 
     let achieved = visual.length;
     let dupIndex = 0;
     while (achieved < target && totalRowCount < MAX_ROWS) {
-      extraRows.push({ id: `auto-${row.id}-${dupIndex}`, slots: visual });
+      extraRows.push({ id: `auto-${row.id}-${dupIndex}`, slots: visual, totalCopies: 0 });
       achieved += visual.length;
       totalRowCount++;
       dupIndex++;
@@ -361,10 +361,11 @@ export default function PassportSizeMakerPage() {
     Promise.all(
       session.rows.map(async (row): Promise<RowGroup> => ({
         id: crypto.randomUUID(),
+        totalCopies: row.totalCopies ?? 0,
         slots: await Promise.all(row.slots.map(async (p): Promise<PhotoSlot> => ({
           id: crypto.randomUUID(), status: 'done', canvas: await canvasFromDataUrl(p.dataUrl), dataUrl: p.dataUrl, error: null,
           brightness: p.brightness ?? 100, saturation: p.saturation ?? 100, sharpness: p.sharpness ?? 100,
-          copiesInRow: p.copiesInRow ?? 1, totalCopies: p.totalCopies ?? 0,
+          copiesInRow: p.copiesInRow ?? 1,
         }))),
       })),
     ).then(restored => setRows(restored));
@@ -376,10 +377,11 @@ export default function PassportSizeMakerPage() {
     const existing = getSession(sessionId);
     const rowsForSave: HistoryRow[] = rows
       .map(r => ({
+        totalCopies: r.totalCopies,
         slots: r.slots.filter(s => s.status === 'done' && s.dataUrl)
           .map(s => ({
             dataUrl: s.dataUrl!, brightness: s.brightness, saturation: s.saturation, sharpness: s.sharpness,
-            copiesInRow: s.copiesInRow, totalCopies: s.totalCopies,
+            copiesInRow: s.copiesInRow,
           })),
       }))
       .filter(r => r.slots.length > 0);
@@ -433,7 +435,7 @@ export default function PassportSizeMakerPage() {
     if (!canAddRow) return;
     const slot = newSlot();
     const rowId = crypto.randomUUID();
-    setRows(prev => [...prev, { id: rowId, slots: [slot] }]);
+    setRows(prev => [...prev, { id: rowId, slots: [slot], totalCopies: 0 }]);
     processFile(file, rowId, slot.id);
   };
 
@@ -475,7 +477,7 @@ export default function PassportSizeMakerPage() {
     }
   };
 
-  const setSlotProp = (rowId: string, slotId: string, patch: Partial<Pick<PhotoSlot, 'brightness' | 'saturation' | 'sharpness' | 'totalCopies'>>) =>
+  const setSlotProp = (rowId: string, slotId: string, patch: Partial<Pick<PhotoSlot, 'brightness' | 'saturation' | 'sharpness'>>) =>
     setRows(prev => prev.map(r => r.id !== rowId ? r : {
       ...r, slots: r.slots.map(s => s.id === slotId ? { ...s, ...patch } : s),
     }));
@@ -493,11 +495,11 @@ export default function PassportSizeMakerPage() {
     }));
   };
 
-  // "Total copies on sheet" — auto-fills extra rows elsewhere on the sheet
-  // so this specific photo reaches the requested total (0 = off, 5–30 step 5).
-  const setTotalCopies = (rowId: string, slotId: string, next: number) => {
+  // "Total copies on sheet" — auto-fills extra whole-row duplicates elsewhere
+  // on the sheet so this row reaches the requested total (0 = off, 5–30 step 5).
+  const setTotalCopies = (rowId: string, next: number) => {
     const clamped = Math.max(0, Math.min(MAX_ROWS * PER_ROW, Math.round(next / 5) * 5));
-    setSlotProp(rowId, slotId, { totalCopies: clamped });
+    setRows(prev => prev.map(r => r.id === rowId ? { ...r, totalCopies: clamped } : r));
   };
 
   const onDragOver  = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
@@ -706,6 +708,23 @@ export default function PassportSizeMakerPage() {
                       </button>
                     )}
 
+                    {/* Total copies on sheet — one control per row, repeats the
+                        whole row (same photo mix) as extra full rows below */}
+                    <div className="flex items-center justify-between gap-3 bg-gray-50 rounded-xl px-3 py-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Layers className="w-4 h-4 text-gray-400 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-primary">Total copies on sheet</p>
+                          <p className="text-[10px] text-gray-400">
+                            {row.totalCopies > 0 ? `Repeats this whole row further down until it totals ${row.totalCopies}` : 'Off — uses only this row'}
+                          </p>
+                        </div>
+                      </div>
+                      <Stepper value={row.totalCopies} min={0} max={MAX_ROWS * PER_ROW} step={5}
+                        onChange={n => setTotalCopies(row.id, n)}
+                        format={n => n === 0 ? 'Off' : String(n)} />
+                    </div>
+
                     {/* Per-photo adjustment controls */}
                     {row.slots.filter(s => s.status === 'done').map((slot, i) => {
                       const rowMax = Math.max(1, PER_ROW - row.slots.filter(s => s.id !== slot.id)
@@ -771,22 +790,6 @@ export default function PassportSizeMakerPage() {
                           >
                             {slot.sharpness}%
                           </button>
-                        </div>
-
-                        {/* Total copies across the whole sheet */}
-                        <div className="flex items-center justify-between gap-3 bg-gray-50 rounded-xl px-3 py-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Layers className="w-4 h-4 text-gray-400 shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-xs font-semibold text-primary">Total copies on sheet</p>
-                              <p className="text-[10px] text-gray-400">
-                                {slot.totalCopies > 0 ? `Repeats this whole row further down until Row ${rowIdx + 1} totals ${slot.totalCopies}` : 'Off — uses only this row'}
-                              </p>
-                            </div>
-                          </div>
-                          <Stepper value={slot.totalCopies} min={0} max={MAX_ROWS * PER_ROW} step={5}
-                            onChange={n => setTotalCopies(row.id, slot.id, n)}
-                            format={n => n === 0 ? 'Off' : String(n)} />
                         </div>
                       </div>
                       );

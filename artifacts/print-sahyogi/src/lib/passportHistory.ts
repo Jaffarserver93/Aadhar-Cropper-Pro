@@ -7,11 +7,11 @@ export interface HistoryPhoto {
   saturation: number;
   sharpness: number;
   copiesInRow?: number; // how many times this photo repeats within its own row (1–5)
-  totalCopies?: number; // total copies of this photo across the whole sheet, 0 = off (5–30 step 5)
 }
 
 export interface HistoryRow {
   slots: HistoryPhoto[]; // 1–5 independent photos in one physical row
+  totalCopies?: number; // total copies of this whole row across the sheet, 0 = off (5–30 step 5)
 }
 
 export interface HistorySession {
