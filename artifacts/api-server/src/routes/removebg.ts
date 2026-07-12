@@ -59,7 +59,7 @@ async function pollPicwishTask(apiKey: string, taskId: string): Promise<string> 
 }
 
 router.post("/removebg", upload.single("image_file"), async (req, res) => {
-  const apiKey = process.env["PICWISH_API_KEY"];
+  const apiKey = process.env["REMOVEBG_API_KEY"];
   if (!apiKey) {
     res.status(503).json({ error: "Background removal service is not configured." });
     return;
